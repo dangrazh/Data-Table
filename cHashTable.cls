@@ -87,7 +87,7 @@ Private Const C_Name As String = "cHashTable.cls"
 
 Private Type SlotType
     Key As String
-    value As Variant
+    Value As Variant
     nextItem As Long      ' 0 if last item
 End Type
 
@@ -221,7 +221,7 @@ End Function
 
 ' add a new element to the hash table
 
-Sub Add(Key As String, value As Variant)
+Sub Add(Key As String, Value As Variant)
     Dim ndx As Long, Create As Boolean
     
     ' get the index to the slot where the value is
@@ -231,10 +231,10 @@ Sub Add(Key As String, value As Variant)
     
     If Create Then
         ' the item was actually added
-        If IsObject(value) Then
-            Set slotTable(ndx).value = value
+        If IsObject(Value) Then
+            Set slotTable(ndx).Value = Value
         Else
-            slotTable(ndx).value = value
+            slotTable(ndx).Value = Value
         End If
     Else
         ' raise error "This key is already associated with an item of this
@@ -252,29 +252,29 @@ Property Get Item(Key As String) As Variant
     ndx = GetSlotIndex(Key)
     If ndx = 0 Then
         ' return Empty if not found
-    ElseIf IsObject(slotTable(ndx).value) Then
-        Set Item = slotTable(ndx).value
+    ElseIf IsObject(slotTable(ndx).Value) Then
+        Set Item = slotTable(ndx).Value
     Else
-        Item = slotTable(ndx).value
+        Item = slotTable(ndx).Value
     End If
 End Property
 
-Property Let Item(Key As String, value As Variant)
+Property Let Item(Key As String, Value As Variant)
     Dim ndx As Long
     ' get the index to the slot where the value is
     ' (allocate a new slot if necessary)
     ndx = GetSlotIndex(Key, True)
     ' store the value
-    slotTable(ndx).value = value
+    slotTable(ndx).Value = Value
 End Property
 
-Property Set Item(Key As String, value As Object)
+Property Set Item(Key As String, Value As Object)
     Dim ndx As Long
     ' get the index to the slot where the value is
     ' (allocate a new slot if necessary)
     ndx = GetSlotIndex(Key, True)
     ' store the value
-    Set slotTable(ndx).value = value
+    Set slotTable(ndx).Value = Value
 End Property
 
 ' remove an item from the hash table
@@ -352,10 +352,10 @@ Property Get Values() As Variant()
         ndx = hashTbl(i)
         ' walk the slottable() array
         Do While ndx
-            If IsObject(slotTable(ndx).value) Then
-                Set res(n) = slotTable(ndx).value
+            If IsObject(slotTable(ndx).Value) Then
+                Set res(n) = slotTable(ndx).Value
              Else
-                res(n) = slotTable(ndx).value
+                res(n) = slotTable(ndx).Value
             End If
             n = n + 1
             ndx = slotTable(ndx).nextItem
@@ -378,10 +378,10 @@ Property Get KeysAndValues() As Variant()
         ' walk the slottable() array
         Do While ndx
             res(n, 0) = slotTable(ndx).Key
-            If IsObject(slotTable(ndx).value) Then
-                Set res(n, 1) = slotTable(ndx).value
+            If IsObject(slotTable(ndx).Value) Then
+                Set res(n, 1) = slotTable(ndx).Value
              Else
-                res(n, 1) = slotTable(ndx).value
+                res(n, 1) = slotTable(ndx).Value
             End If
             n = n + 1
             ndx = slotTable(ndx).nextItem
@@ -528,22 +528,22 @@ Function StringToLng(txt As String, full_len As Integer) As Long
 
 Dim strlen As Integer
 Dim i As Integer
-Dim value As Double
+Dim Value As Double
 Dim ch As String * 1
     
     strlen = Len(txt)
     If strlen > full_len Then strlen = full_len
     
-    value = 0#
+    Value = 0#
     For i = 1 To strlen
         ch = Mid$(txt, i, 1)
-        value = value * STRING_BASE + Asc(ch) - ASC_A + 1
+        Value = Value * STRING_BASE + Asc(ch) - ASC_A + 1
     Next i
 
     For i = strlen + 1 To full_len
-        value = value * STRING_BASE
+        Value = Value * STRING_BASE
     Next i
 
-    StringToLng = value
+    StringToLng = Value
 End Function
 

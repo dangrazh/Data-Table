@@ -63,6 +63,18 @@ Public Enum IndexType
     NotDefined = 3
 End Enum
 
+Private Enum MatchType
+    Equals = 1
+    DoesNotEqual = 2
+    MatchesPattern = 3
+    DoesNotMatchPattern = 4
+    GreaterThen = 5
+    GreaterThenOrEqual = 6
+    LessThen = 7
+    LessThenOrEqual = 8
+End Enum
+
+
 
 '#======================================================================================================================
 '# Private Variables
@@ -132,12 +144,12 @@ Public Property Get ClassName() As String
     
 End Property
 
-Public Property Let Name(value As String)
+Public Property Let Name(Value As String)
 ' ***********************************************
 ' Sets the name of the Index.
 ' ***********************************************
 
-    m_Name = value
+    m_Name = Value
     
 End Property
 
@@ -161,12 +173,12 @@ Public Property Get IndexType() As IndexType
     
 End Property
 
-Public Property Let IndexType(value As IndexType)
+Public Property Let IndexType(Value As IndexType)
 ' ***********************************************
 ' Returns the type of the index.
 ' ***********************************************
 
-    m_IndexType = value
+    m_IndexType = Value
     
 End Property
 
@@ -209,4 +221,24 @@ Public Sub Create(ByRef DataTable As cDataTable, Column As String)
 
 End Sub
 
+Public Function GetNextItem(SearchFor As Variant, match As Long, Optional Start As Long = 1) As Long
+' ***********************************************
+' Get the pointer to the next item in the index
+' ***********************************************
+    
+    Dim stSearchFor As String
+    
+    stSearchFor = CStr(SearchFor)
 
+    If m_IndexType = UniqueIndex Then
+        If m_IndexUnique.Exists(stSearchFor) Then
+            GetNextItem = m_IndexUnique.Item(stSearchFor)
+         Else
+            GetNextItem = 0
+        End If
+     ElseIf m_IndexType = NonUniqueIndex Then
+        '§§§ to be implemented §§§
+    End If
+
+
+End Function

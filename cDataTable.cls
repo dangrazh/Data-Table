@@ -22,7 +22,7 @@ Option Base 1
 '     |> Get | --- About                :: Returns description of the class.
 '     |> --------- CreateLogFile        :: Creates a logfile for output and stores it in the specified [storageDirectory].
 '     |> Get | Let DirectoryPath        :: Returns the directory location of the current logfile.
-'     |> Get | --- Name                 :: Returns name of the class.
+'     |> Get | --- Name                 :: Returns name of the data table (Default Property).
 '     |> Get | --- Version              :: Returns version string for the class [e.g. #.# (year)].
 
 
@@ -50,6 +50,9 @@ Option Base 1
     Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As LongPtr)
     Private Declare PtrSafe Sub FillMemory Lib "kernel32" Alias "RtlFillMemory" (Destination As Any, ByVal Length As LongPtr, ByVal Fill As Byte)
     Private Declare PtrSafe Sub ZeroMemory Lib "kernel32" Alias "RtlZeroMemory" (Destination As Any, ByVal Length As LongPtr)
+    Private Declare PtrSafe Function ArrayPtr Lib "msvbvm60" Alias "VarPtr" (Arr() As Any) As LongPtr
+    Private Declare PtrSafe Sub PutMem4 Lib "msvbvm60" (ByVal Ptr As LongPtr, ByVal Value As Long)
+    Private Declare PtrSafe Function SafeArrayRedim Lib "oleaut32" (ByVal saPtr As LongPtr, saBound As Long) As LongPtr
 #Else
     Private Const PTR_LENGTH As Long = 4
     Private Declare Function VarPtrArray Lib "VBE7" Alias "VarPtr" (ByRef Var() As Any) As LongPtr
@@ -57,6 +60,9 @@ Option Base 1
     Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As LongPtr)
     Private Declare Sub FillMemory Lib "kernel32" Alias "RtlFillMemory" (Destination As Any, ByVal Length As LongPtr, ByVal Fill As Byte)
     Private Declare Sub ZeroMemory Lib "kernel32" Alias "RtlZeroMemory" (Destination As Any, ByVal Length As LongPtr)
+    Private Declare Function ArrayPtr Lib "msvbvm60" Alias "VarPtr" (Arr() As Any) As Long
+    Private Declare Sub PutMem4 Lib "msvbvm60" (ByVal Ptr As Long, ByVal Value As Long)
+    Private Declare Function SafeArrayRedim Lib "oleaut32" (ByVal saPtr As Long, saBound As Long) As Long
 #End If
 
 
@@ -141,7 +147,7 @@ End Type
 'Type Declarations needed for SafeArray hacks
 
 'The bounds of the SafeArray
-Private Type SAFEARRAYBOUND
+Private Type SafeArrayBound
     cElements    As Long
     lLbound      As Long
 End Type
@@ -152,7 +158,7 @@ Private Type SAFEARRAY1D
     cbElements      As Long
     cLocks          As Long
     pvData          As LongPtr
-    Bounds(0 To 0)  As SAFEARRAYBOUND
+    Bounds(0 To 0)  As SafeArrayBound
 End Type
 
 Private Type SAFEARRAY2D
@@ -161,21 +167,8 @@ Private Type SAFEARRAY2D
     cbElements      As Long
     cLocks          As Long
     pvData          As LongPtr
-    Bounds(0 To 1)  As SAFEARRAYBOUND
+    Bounds(0 To 1)  As SafeArrayBound
 End Type
-
-'Constants needed for SafeArray hacks
-Private Const FADF_AUTO = &H1            'The array is in the Stack
-Private Const FADF_STATIC = &H2          'A static array
-Private Const FADF_EMBEDDED = &H4        'The field is embedded in a structure
-Private Const FADF_FIXEDSIZE = &H10      'The bounds of the array are fixed
-Private Const FADF_RECORD = &H20         'The array contains records
-Private Const FADF_HAVEIID = &H40        'The array is identifyable over a IID-interface
-Private Const FADF_HAVEVARTYPE = &H80    'Field of type VT
-Private Const FADF_BSTR = &H100          'String array
-Private Const FADF_UNKNOWN = &H200       'Array with interface IUnknown
-Private Const FADF_DISPATCH = &H400      'Array with interface IDispatch
-Private Const FADF_VARIANT = &H800       'Array of type Variant
 
 
 '#======================================================================================================================
@@ -183,6 +176,7 @@ Private Const FADF_VARIANT = &H800       'Array of type Variant
 '#======================================================================================================================
 Private m_Name As String                        ' The name of the data table
 Private m_List() As Variant                     ' The list array.
+Private m_IdxToList() As Long                   ' The index table to access the list array
 Private m_ListTransposed() As Variant           ' The transposed list array
 Private m_NumCols As Long                       ' Number of Columns
 Private m_NumItems As Long                      ' Last index in use.
@@ -193,6 +187,7 @@ Private m_MaxGarbage As Long                    ' Collect when m_GarbageCount > 
 Private m_FirstGarbage As Long                  ' The index of the 1st record containing garbage
 Private m_LastGarbage As Long                   ' The index of the last record containing garbage
 Private m_CollectGarbage As Boolean             ' Flag to determine if we should collect garbage
+Private m_EnableObjects As Boolean              ' Flag to determine if we allow objects to be stored
 Private m_Columns() As DataColumn               ' Array containing the data columns
 Private m_SearchLastItem As Variant             ' The last item that was searched
 Private m_SearchLastColumn As Long              ' Contains the column index of the column last searched
@@ -219,6 +214,7 @@ Private Sub Class_Initialize()
     
     'Set list to minimal size
     ReDim m_List(1, 1)
+    ReDim m_IdxToList(1 To 1)
     
     'set the default name
     m_Name = "DataTable"
@@ -233,8 +229,9 @@ Private Sub Class_Initialize()
         
     'initialize any default / start values
     m_NumCols = 1
-    'm_SortedColumn = -1
     m_Bookmark = -1
+    m_FirstGarbage = 1
+    m_LastGarbage = 1
     
     'initialize error codes
     m_Errors(1).errNumber = 513:  m_Errors(1).errDescrption = "List is not empty. Range can only be added to empty list!"
@@ -278,7 +275,8 @@ Public Property Get Version() As String
    'Version = "Version 1.1.0.0 (06/2017)"   'Including features to make class thread save
    'Version = "Version 1.2.0.0 (12/2017)"   'Including new features on columns and 1st version of indexing
    'Version = "Version 1.2.1.0 (01/2018)"   'Including x64 compatibility
-   Version = "Version 1.2.2.1 (01/2018)"    'Fixed pattern matching and SortUnstable
+   'Version = "Version 1.2.2.1 (01/2018)"    'Fixed pattern matching and SortUnstable
+   Version = "Version 1.2.2.2 (02/2018)"    'Fixed RecordAdd to handle both arrays and ParamArray
    
 
 End Property
@@ -296,7 +294,7 @@ Public Property Get ClassName() As String
 ' Returns the name of the class.
 ' ***********************************************
     
-    Name = C_Name
+    ClassName = C_Name
     
 End Property
 
@@ -309,12 +307,12 @@ Public Property Get Name() As String
     
 End Property
 
-Public Property Let Name(value As String)
+Public Property Let Name(Value As String)
 ' ***********************************************
 ' Sets the name of the data table.
 ' ***********************************************
 
-    m_Name = value
+    m_Name = Value
 
 End Property
 
@@ -388,12 +386,12 @@ Public Property Get GarbageCollection() As Boolean
 
 End Property
 
-Public Property Let GarbageCollection(value As Boolean)
+Public Property Let GarbageCollection(Value As Boolean)
 ' ***********************************************
 ' Sets the CollectGarbage state of the class.
 ' ***********************************************
     
-    If value = False Then
+    If Value = False Then
         'Set the state to false
         m_CollectGarbage = False
      Else
@@ -407,27 +405,59 @@ Public Property Let GarbageCollection(value As Boolean)
 
 End Property
 
-
-
-Public Property Get SADescrPtr() As LongPtr
+Public Property Get ObjectStorageEnabled() As Boolean
 ' ***********************************************
-' Return the pointer to the SafeArray Descriptor
+' Returns the ObjectStorageEnabled state of the class.
 ' ***********************************************
 
+    ObjectStorageEnabled = m_EnableObjects
 
-    SADescrPtr = getSafeArrayDescrPtr(m_List)
 
 End Property
 
-Public Property Get SAStructPtr() As LongPtr
+
+Public Property Let ObjectStorageEnabled(Value As Boolean)
 ' ***********************************************
-' Return the pointer to the SafeArray Descriptor
+' Sets the ObjectStorageEnabled state of the class.
 ' ***********************************************
 
-
-    SAStructPtr = getSafeArrayStructPtr(m_List)
+    m_EnableObjects = Value
 
 End Property
+
+Public Property Get TableSummary() As String
+' ***********************************************
+' This displays a summary of the table
+' ## This is the default property ##
+' ***********************************************
+
+    TableSummary = "Table Name: " & m_Name & vbCrLf & _
+                    "No of Cols: " & m_NumCols & vbCrLf & _
+                    "No of Recs: " & m_NumItems & vbCrLf & _
+                    "Obj enabled: " & m_EnableObjects
+
+End Property
+
+
+'Public Property Get SADescrPtr() As LongPtr
+'' ***********************************************
+'' Return the pointer to the SafeArray Descriptor
+'' ***********************************************
+'
+'
+'    SADescrPtr = getSafeArrayDescrPtr(m_List)
+'
+'End Property
+'
+'Public Property Get SAStructPtr() As LongPtr
+'' ***********************************************
+'' Return the pointer to the SafeArray Descriptor
+'' ***********************************************
+'
+'
+'    SAStructPtr = getSafeArrayStructPtr(m_List)
+'
+'End Property
 
 
 Public Property Get RsEOF() As Boolean
@@ -457,16 +487,16 @@ Public Property Get RsBookmark() As Long
 
 End Property
 
-Public Property Let RsBookmark(value As Long)
+Public Property Let RsBookmark(Value As Long)
 ' ***********************************************
 ' Set the pointer of the current record within the recordset
 ' to a specific position
 ' ***********************************************
 
-    If value > m_NumItems Then
+    If Value > m_NumItems Then
         m_EOF = True
      Else
-        m_Bookmark = value
+        m_Bookmark = Value
     End If
 
 End Property
@@ -507,7 +537,7 @@ Public Property Get Item(Index As Variant, Optional Row As Long = -1) As Variant
 End Property
 
 
-Public Property Let Item(Index As Variant, Optional Row As Long = -1, value As Variant)
+Public Property Let Item(Index As Variant, Optional Row As Long = -1, Value As Variant)
 ' ***********************************************
 ' Set the value of a given item at position / index
 ' ***********************************************
@@ -519,10 +549,10 @@ Public Property Let Item(Index As Variant, Optional Row As Long = -1, value As V
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
-            Call ItemSet(Row, CStr(Index), value)
+            Call ItemSet(Row, CStr(Index), Value)
      ElseIf m_Bookmark > -1 Then
         'we have a valid bookmark so let's use this
-        Call ItemSet(m_Bookmark, CStr(Index), value)
+        Call ItemSet(m_Bookmark, CStr(Index), Value)
      Else
         MsgBox "Unhandled condition in Property Let 'Item'", vbCritical
         Exit Property
@@ -530,7 +560,8 @@ Public Property Let Item(Index As Variant, Optional Row As Long = -1, value As V
 
 End Property
 
-Public Property Get Record(Optional Row As Long = -1) As Variant
+
+Public Property Get Record(Optional Row As Long = -1) As Variant()
 ' ***********************************************
 ' Return an record from the list by position.
 ' ***********************************************
@@ -564,10 +595,11 @@ Public Property Get Record(Optional Row As Long = -1) As Variant
 
         ReDim tmpRec(1 To m_NumCols)
         
-        For iCol = 1 To m_NumCols
-                ' Return the record.
-                tmpRec(iCol) = m_List(iCol, position)
-        Next iCol
+        'For iCol = 1 To m_NumCols
+        '        ' Return the record.
+        '        tmpRec(iCol) = m_List(iCol, position)
+        'Next iCol
+        RecordRead tmpRec, position
         
         Record = tmpRec
                 
@@ -575,7 +607,7 @@ Public Property Get Record(Optional Row As Long = -1) As Variant
 
 End Property
 
-Public Property Let Record(Row As Long, Record As Variant)
+Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
 ' ***********************************************
 ' Update a record in the list by position.
 ' ***********************************************
@@ -596,7 +628,7 @@ Public Property Let Record(Row As Long, Record As Variant)
         'we have a valid bookmark so let's use this
         position = m_Bookmark
      Else
-        MsgBox "Unhandled condition in Property Get 'Record'", vbCritical
+        MsgBox "Unhandled condition in Property Let 'Record'", vbCritical
         Exit Property
     End If
         
@@ -614,13 +646,18 @@ Public Property Let Record(Row As Long, Record As Variant)
             CheckLockStatus
             LockForUpdate
                         
-            For iCol = 1 To m_NumCols
-                ' Set the record values.
-                m_List(iCol, position) = Record(iCol)
-            Next iCol
+            'For iCol = 1 To m_NumCols
+            '    ' Set the record values.
+            '    m_List(iCol, position) = Record(iCol)
+            'Next iCol
+            RecordWrite position, Record, 0
         
             'handle thread safety
             ReleaseLock
+            
+            'mark as dirty
+            m_IsDirty = True
+            
         Else
             'raise error -> Not the same no of column Names as NoOfColumns specified
             ' The range 513-65535 is available for user errors.
@@ -800,8 +837,43 @@ Public Sub TruncateTable(AskForConfirmation As Boolean)
 
 End Sub
 
+Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Variant
+' ***********************************************
+' Return an item from the list by position.
+' ***********************************************
 
-Private Sub ItemSet(ByVal position As Long, ByVal Index As String, value As Variant)
+    Dim iCol As Long
+    'Dim bColFound As Boolean: bColFound = False
+
+    'handle thread safety
+    CheckLockStatus
+    LockForUpdate
+
+
+    If position < 1 Or position > m_NumItems Then
+        ' Out of bounds. Return Null.
+        ItemGet = Null
+    Else
+    
+        iCol = GetColumnIndex(Index)
+        
+        If iCol = -1 Then
+            'Column Name not found. Return Null.
+            ItemGet = Null
+         Else
+            ' Return the item.
+            'ItemGet = m_List(iCol, position)
+            ItemRead ItemGet, iCol, position
+        End If
+                
+    End If
+        
+    'handle thread safety
+    ReleaseLock
+        
+End Function
+
+Private Sub ItemSet(ByVal position As Long, ByVal Index As String, Value As Variant)
 ' ***********************************************
 ' Set the value of an item in the list by position.
 ' ***********************************************
@@ -828,119 +900,140 @@ Private Sub ItemSet(ByVal position As Long, ByVal Index As String, value As Vari
             LockForUpdate
          
             ' Set the value of the item
-            m_List(iCol, position) = value
+            'm_List(iCol, position) = value
+            ItemWrite Value, iCol, position
             
             'handle thread safety
             ReleaseLock
+            
+            'mark as dirty
+            m_IsDirty = True
+            
         End If
                 
     End If
         
 End Sub
         
-             
-        
-Public Sub RecordAdd(ByVal aRecord As Variant)
+Public Sub RecordAddOld(ByVal aRecord As Variant)
 ' ***********************************************
 ' Add a record to the list
 ' ***********************************************
 
         Dim iCol As Long
-
-        'handle thread safety
-        CheckLockStatus
-        LockForUpdate
  
         'Check if no of items in the record is in line with the number of colums in the list
         If UBound(aRecord) = UBound(m_List, 1) Then
         
-                'handle thread safety
-                CheckLockStatus
-                LockForUpdate
-        
-                'increase the row index
-                m_NumItems = m_NumItems + 1
-                'resize the list if required
-                If m_NumItems > m_ArraySize Then ResizeList (IncludingWantFreeSpace)
+            'handle thread safety
+            CheckLockStatus
+            LockForUpdate
+    
+            'increase the row index
+            m_NumItems = m_NumItems + 1
+            'resize the list if required
+            If m_NumItems > m_ArraySize Then ResizeList (IncludingWantFreeSpace)
 
-                'add the record to the list
-                For iCol = 1 To m_NumCols
-                        m_List(iCol, m_NumItems) = aRecord(iCol)
-                Next iCol
-                
-                'set bookmark to the new record
-                m_Bookmark = m_NumItems
-                
-                'mark data table as dirty
-                m_IsDirty = True
-                
-                'handle thread safety
-                ReleaseLock
+            'add the record to the list
+            For iCol = 1 To m_NumCols
+                    m_List(iCol, m_NumItems) = aRecord(iCol)
+            Next iCol
+            
+            'set bookmark to the new record
+            m_Bookmark = m_NumItems
+            
+            'mark data table as dirty
+            m_IsDirty = True
+            
+            'handle thread safety
+            ReleaseLock
 
          Else
-         
-                'raise error -> Not the same no of column Names as NoOfColumns specified
-                ' The range 513-65535 is available for user errors.
-                ' For class errors, you add vbObjectError to the error number.
-                Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
+            
+            'raise error -> Not the same no of column Names as NoOfColumns specified
+            ' The range 513-65535 is available for user errors.
+            ' For class errors, you add vbObjectError to the error number.
+            Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
                 
         End If
         
-        'handle thread safety
-        ReleaseLock
         
 End Sub
 
-Public Sub RecordAddParamArray(ParamArray Record() As Variant)
+Public Sub RecordAdd(ParamArray Record() As Variant)
 ' ***********************************************
 ' Add a record to the list - based on Param Array
 ' ***********************************************
 
         Dim iCol As Long
+        Dim iColOffset As Integer: iColOffset = 0
+        Dim lNoOfCols As Long
 
-        'handle thread safety
-        CheckLockStatus
-        LockForUpdate
-
- 
+    
+        'Check if 1st element of ParamArray is an array itself,
+        'if yes make the 1st element the record
+        If IsArray(Record(0)) Then
+            Record = Record(0)
+        End If
+    
+    
         'Check if no of items in the record is in line with the number of colums in the list
         'Attention: the ParamArray is a 0-based array, so we need to consider this here
-        If UBound(Record) + 1 = UBound(m_List, 1) Then
+        lNoOfCols = (UBound(Record) - LBound(Record)) + 1
+        If LBound(Record) = 0 Then
+            iColOffset = -1
+        End If
+ 
+        If lNoOfCols = UBound(m_List, 1) Then
         
-                'handle thread safety
-                CheckLockStatus
-                LockForUpdate
-                    
-                'increase the row index
-                m_NumItems = m_NumItems + 1
-                'resize the list if required
-                If m_NumItems > m_ArraySize Then ResizeList (IncludingWantFreeSpace)
+            'handle thread safety
+            CheckLockStatus
+            LockForUpdate
+                
+            'increase the row index
+            m_NumItems = m_NumItems + 1
+            'resize the list if required
+            If m_NumItems > m_ArraySize Then ResizeList (IncludingWantFreeSpace)
 
+            'add the record to the list -> can't use RecordWrite as ParamArray
+            'does not work as input to other procedure
+            'For iCol = 1 To m_NumCols
+            '        m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
+            'Next iCol
+            If m_EnableObjects Then
                 'add the record to the list
                 For iCol = 1 To m_NumCols
-                        m_List(iCol, m_NumItems) = Record(iCol - 1)
+                        If IsObject(Record(iCol + iColOffset)) Then
+                            Set m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
+                         Else
+                            m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
+                        End If
                 Next iCol
-                
-                'mark data table as dirty
-                m_IsDirty = True
-                
-                'handle thread safety
-                ReleaseLock
-                
+             Else
+                'add the record to the list
+                For iCol = 1 To m_NumCols
+                        m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
+                Next iCol
+            End If
+                        
+                        
+            'mark data table as dirty
+            m_IsDirty = True
+            
+            'handle thread safety
+            ReleaseLock
+                     
          Else
          
-                'raise error -> Not the same no of column Names as NoOfColumns specified
-                ' The range 513-65535 is available for user errors.
-                ' For class errors, you add vbObjectError to the error number.
-                Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
+            'raise error -> Not the same no of column Names as NoOfColumns specified
+            ' The range 513-65535 is available for user errors.
+            ' For class errors, you add vbObjectError to the error number.
+            Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
                 
         End If
         
-        'handle thread safety
-        ReleaseLock
         
 End Sub
-
 
 Public Sub RecordRemove(ByVal position As Long)
 ' ***********************************************
@@ -1039,7 +1132,7 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         If TableHasHeaders = True Then
                 For iCol = 1 To iColCount
                         'm_Columns(iCol) = InputTable.Cells(1, (iColStart - 1) + iCol).value
-                        m_Columns(iCol).Name = InputTable.Cells(1, iCol).value
+                        m_Columns(iCol).Name = InputTable.Cells(1, iCol).Value
                         m_Columns(iCol).Number = iCol
                         m_Columns(iCol).IsSorted = False
                         m_Columns(iCol).IsIndexed = False
@@ -1059,9 +1152,9 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         
         
         'Now load the data range without header into the array
-        mTimer.Reset
+        'mTimer.Reset
         m_List = InputTable
-        Debug.Print "Assigning the input range to the variant array took: " & mTimer.MillisecondsElapsed & " milliseconds..."
+        'Debug.Print "Assigning the input range to the variant array took: " & mTimer.MillisecondsElapsed & " milliseconds..."
         
         m_NumItems = UBound(m_List)
         m_ArraySize = UBound(m_List)
@@ -1070,44 +1163,24 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         
         Call Transpose
         
-        Dim switch As Integer: switch = 2
+        'Performance Improvement: rather than copying the transposed list into the list to
+        'transpose it back further down with 'CleanUpTable', simply swap the pointers to the base array info
+        'To do so, we need three pointers to the descriptor of m_List, m_ListTransposed and a temp list we need
+        'as a temporary buffer to store the pointer
+                    
+        'Get the pointers to the SafeArray
+        ptrList = getSafeArrayDescrPtr(m_List)
+        ptrListTransposed = getSafeArrayDescrPtr(m_ListTransposed)
+        ptrListTemp = getSafeArrayDescrPtr(ListTemp)
         
-        Debug.Print "Switch is: " & switch
+        'Swap list Transposed and List
+        Call CopyMemory(ByVal ptrListTemp, ByVal ptrList, 4)
+        Call CopyMemory(ByVal ptrList, ByVal ptrListTransposed, 4)
+        Call CopyMemory(ByVal ptrListTransposed, ByVal ptrListTemp, 4)
         
-        If switch = 1 Then
-            
-            mTimer.Reset
-            'swap transposed list and list
-            ListTemp = m_List
-            m_List = m_ListTransposed
-            m_ListTransposed = ListTemp
-            Debug.Print "Swapping the lists (classic) took: " & mTimer.MillisecondsElapsed & " milliseconds..."
-            
-         ElseIf switch = 2 Then
-            
-            'Performance Improvement: rather than copying the transposed list into the list to
-            'transpose it back further down with 'CleanUpTable', simply swap the pointers to the base array info
-            'To do so, we need three pointers to the descriptor of m_List, m_ListTransposed and a temp list we need
-            'as a temporary buffer to store the pointer
-            
-            mTimer.Reset
-                        
-            'Get the pointers to the SafeArray
-            ptrList = getSafeArrayDescrPtr(m_List)
-            ptrListTransposed = getSafeArrayDescrPtr(m_ListTransposed)
-            ptrListTemp = getSafeArrayDescrPtr(ListTemp)
-            
-            'Swap list Transposed and List
-            Call CopyMemory(ByVal ptrListTemp, ByVal ptrList, 4)
-            Call CopyMemory(ByVal ptrList, ByVal ptrListTransposed, 4)
-            Call CopyMemory(ByVal ptrListTransposed, ByVal ptrListTemp, 4)
-            
-            'clean pointer of temp list to avoid crash on extiting the programm
-            Call CopyMemory(ByVal ptrListTemp, 0&, 4&)
-            
-            Debug.Print "Swapping the lists (CopyMemory) took: " & mTimer.MillisecondsElapsed & " milliseconds..."
-            
-        End If
+        'clean pointer of temp list to avoid crash on extiting the programm
+        Call CopyMemory(ByVal ptrListTemp, 0&, 4&)
+
         
         'Performance Improvement: rather than run 'CleanUpTable' to get rid of the deleted 1st row and to transpose the table,
         'set the m_IsDirty flag manually (no need to transpose as earlier on the two arrays have been swapped anyway)
@@ -1137,18 +1210,23 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         
 End Sub
 
-Public Sub LoadDelimTextFile(filename As String, FieldDelimiter As String, RecordDelimiter As String, TableHasHeaders As Boolean, Optional TextQualifier As String)
+Public Sub LoadDelimTextFile(filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """")
 ' ***********************************************
 ' Add a delimiter File to the empty table
 ' ***********************************************
 
+    Dim iRows As Long
+    Dim iCols As Long
     Dim iCol As Long
     Dim iColCount As Long
     Dim lFn As Integer
+    Dim iCellIdx As Long
+    Dim iFirstCell As Long
+    
+    Dim stFileContent As String
+    Dim stCells() As String
+    
         
-    'handle thread safety
-    CheckLockStatus
-    LockForUpdate
 
 
     If m_NumItems > 0 Then
@@ -1158,20 +1236,84 @@ Public Sub LoadDelimTextFile(filename As String, FieldDelimiter As String, Recor
             Err.Raise vbObjectError + 513, Me.Name, "List is not empty. Range can only be added to empty list!"
      Else
         
+        'handle thread safety
+        CheckLockStatus
+        LockForUpdate
+        
+        
         lFn = VBA.FreeFile
         
+        '1. Open the file and load the data into a string
         Open filename For Input As #lFn
+            stFileContent = Input(LOF(lFn), #lFn)
+        Close #lFn
         
-        '1. Open the file, parse the records
-        '2. Check if table has headers
-        '3. Count the columns & Define the table structure
-        '4. Read the headers first and add header info
+        '2. parse the records
+        SplitCSV stFileContent, stCells, iCols, iRows, FieldDelimiter, RecordDelimiter, TextQualifier
+        
+        
+        '3. Define the table
+        
+        'Size the list and set attributes
+        If TableHasHeaders = True Then
+            ReDim m_List(1 To iCols, 1 To iRows - 1)
+            m_ArraySize = iRows - 1
+            m_NumItems = iRows - 1
+         Else
+            ReDim m_List(1 To iCols, 1 To iRows)
+            m_ArraySize = iRows
+            m_NumItems = iRows
+        End If
+        m_NumCols = iCols
+
+        'set the columns array
+        iColCount = iCols
+        ReDim m_Columns(1 To iColCount)
+            
+        If TableHasHeaders = True Then
+            'Debug.Print "Row " & (iCellIdx \ lngCols), "Column " & (iCellIdx Mod lngCols), "Data: " & stCells(iCellIdx)
+            For iCol = 1 To iColCount
+                    m_Columns(iCol).Name = stCells(iCol - 1)
+                    m_Columns(iCol).Number = iCol
+                    m_Columns(iCol).IsSorted = False
+                    m_Columns(iCol).IsIndexed = False
+                    m_Columns(iCol).Type = dtString
+            Next iCol
+            iFirstCell = iCol - 1
+        Else
+            For iCol = 1 To iColCount
+                    m_Columns(iCol).Name = "Field" & iCol
+                    m_Columns(iCol).Number = iCol
+                    m_Columns(iCol).IsSorted = False
+                    m_Columns(iCol).IsIndexed = False
+                    m_Columns(iCol).Type = dtString
+            Next iCol
+            iFirstCell = 0
+        End If
+        m_HasHeaders = True
+        
+        
         '5. loop through all records and add them to the table
+        If TableHasHeaders = True Then
+            For iCellIdx = iFirstCell To UBound(stCells)
+                'Debug.Print "Column " & (iCellIdx Mod lngCols), "Row " & (iCellIdx \ lngCols), "Data: " & stCells(iCellIdx)
+                m_List((iCellIdx Mod iCols) + 1, (iCellIdx \ iCols)) = stCells(iCellIdx)
+            Next iCellIdx
+         Else
+            For iCellIdx = iFirstCell To UBound(stCells)
+                'Debug.Print "Column " & (iCellIdx Mod lngCols), "Row " & (iCellIdx \ lngCols), "Data: " & stCells(iCellIdx)
+                m_List((iCellIdx Mod iCols) + 1, (iCellIdx \ iCols) + 1) = stCells(iCellIdx)
+            Next iCellIdx
+        End If
+        
+        'handle thread safety
+        ReleaseLock
+        
+        'mark as dirty
+        m_IsDirty = True
+        
     End If
         
-    'handle thread safety
-    ReleaseLock
-    
 
 End Sub
 
@@ -1280,6 +1422,7 @@ Private Sub ResizeList(tyResize As ResizeType)
     
     
     ReDim Preserve m_List(1 To m_NumCols, 1 To m_ArraySize)
+    ReDim Preserve m_IdxToList(1 To m_ArraySize)
 
         
     ' We will shrink the array if SL_NumItems < SL_ShrinkWhen.
@@ -1308,6 +1451,12 @@ Private Sub CollectGarbage()
     Dim iBookmark As Long
     
     'Debug.Print "Collecting garbage..."
+            
+    'check if any garbage is in the table
+    If m_FirstGarbage = 1 And m_LastGarbage = 1 Then
+        'no garbage in the table...
+        Exit Sub
+    End If
             
     'remember the position of the bookmark
     iBookmark = m_Bookmark
@@ -1348,6 +1497,10 @@ Private Sub CollectGarbage()
 
     ' Save the new bookmark
     m_Bookmark = iBookmark
+
+    're-initialize the garbage pointers
+    m_FirstGarbage = 1
+    m_LastGarbage = 1
 
     ' See if we should resize the list.
     If m_NumItems < m_ShrinkWhen Then ResizeList (IncludingWantFreeSpace)
@@ -1520,9 +1673,35 @@ Public Sub RsMovePrevious()
     
 End Sub
 
-Public Sub RsFind(Index As Variant, match As MatchType, Criteria As Variant)
+Public Sub RsFindFirst(Index As Variant, match As MatchType, Criteria As Variant)
 ' ***********************************************
-' Moves the bookmark to the next valid record
+' Moves the bookmark to the first valid record matching the criteria
+' ***********************************************
+
+    'Reset the bookmark to -1 to trigger search
+    'from the beginning of the table
+    m_Bookmark = -1
+    
+    'Find the next matching record
+    RsFind Index, match, Criteria
+
+End Sub
+
+Public Sub RsFindNext(Index As Variant, match As MatchType, Criteria As Variant)
+' ***********************************************
+' Moves the bookmark to the next valid record matching the criteria
+' ***********************************************
+
+    'Find the next matching record
+    RsFind Index, match, Criteria
+    
+
+End Sub
+
+
+Private Sub RsFind(Index As Variant, match As MatchType, Criteria As Variant)
+' ***********************************************
+' Moves the bookmark to the next valid record matching the criteria
 ' ***********************************************
 
     Dim lPointer As Long
@@ -1569,41 +1748,6 @@ End Sub
 '#======================================================================================================================
 '# Data Selection
 '#======================================================================================================================
-
-Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Variant
-' ***********************************************
-' Return an item from the list by position.
-' ***********************************************
-
-    Dim iCol As Long
-    'Dim bColFound As Boolean: bColFound = False
-
-    'handle thread safety
-    CheckLockStatus
-    LockForUpdate
-
-
-    If position < 1 Or position > m_NumItems Then
-        ' Out of bounds. Return Null.
-        ItemGet = Null
-    Else
-    
-        iCol = GetColumnIndex(Index)
-        
-        If iCol = -1 Then
-            'Column Name not found. Return Null.
-            ItemGet = Null
-         Else
-            ' Return the item.
-            ItemGet = m_List(iCol, position)
-        End If
-                
-    End If
-        
-    'handle thread safety
-    ReleaseLock
-        
-End Function
 
 
 Public Function SelectData(FieldList As String, WhereClause As String, Optional GroupBy As String = "", Optional Having As String = "", Optional SortBy As String = "") As cDataTable
@@ -1675,13 +1819,13 @@ On Error GoTo err_DumpToRange
     
     If IncludeHeader = True Then
         For iColIdx = 1 To m_NumCols
-            TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).value = m_Columns(iColIdx).Name
+            TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
         Next iColIdx
         
         'check that table has some records to dump
         If m_NumItems = 0 Then
             'write message that table is empty in top left cell of output area
-            TargetWorksheet.Cells(iRow + 1, iCol).value = "Empty Data Table"
+            TargetWorksheet.Cells(iRow + 1, iCol).Value = "Empty Data Table"
          Else
             TargetWorksheet.Cells(iRow + 1, iCol).Resize(UBound(m_ListTransposed), UBound(m_ListTransposed, 2)) = m_ListTransposed
         End If
@@ -1689,7 +1833,7 @@ On Error GoTo err_DumpToRange
         'check that table has some records to dump
         If m_NumItems = 0 Then
             'write message that table is empty in top left cell of output area
-            TargetWorksheet.Cells(iRow, iCol).value = "Empty Data Table"
+            TargetWorksheet.Cells(iRow, iCol).Value = "Empty Data Table"
          Else
             TargetWorksheet.Cells(iRow, iCol).Resize(UBound(m_ListTransposed), UBound(m_ListTransposed, 2)) = m_ListTransposed
         End If
@@ -1768,7 +1912,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             
             If IncludeHeader = True Then
                 For iColIdx = 1 To m_NumCols
-                    TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).value = m_Columns(iColIdx).Name
+                    TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
                 Next iColIdx
                 
                 iRowOut = iRowOut + 1
@@ -1823,7 +1967,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             '*****
             
             For iColIdx = 1 To m_NumCols
-                TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).value = m_Columns(iColIdx).Name
+                TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
             Next iColIdx
             
             'dump the content cell by cell, row by row
@@ -2020,15 +2164,17 @@ Private Sub MergeSort(List() As Variant, ColToSort As Long, Scratch() As Variant
     i2 = middle + 1 ' Index in list 2
     i3 = min        ' Index in merged list
     Do While i1 <= middle And i2 <= max
-        If List(ColToSort, i1) <= List(ColToSort, i2) Then          '§§§ inverted i<n> and ColToSort
-            For iCols = iColLower To iColUpper
-                Scratch(iCols, i3) = List(iCols, i1)                '§§§ inverted i<n> and iCols
-            Next iCols
+        If List(ColToSort, i1) <= List(ColToSort, i2) Then
+            'For iCols = iColLower To iColUpper
+            '    Scratch(iCols, i3) = List(iCols, i1)
+            'Next iCols
+            DataRowCopy List, i1, Scratch, i3
             i1 = i1 + 1
         Else
-            For iCols = iColLower To iColUpper
-                Scratch(iCols, i3) = List(iCols, i2)                '§§§ inverted i<n> and iCols
-            Next iCols
+            'For iCols = iColLower To iColUpper
+            '    Scratch(iCols, i3) = List(iCols, i2)
+            'Next iCols
+            DataRowCopy List, i2, Scratch, i3
             i2 = i2 + 1
         End If
         i3 = i3 + 1
@@ -2036,25 +2182,28 @@ Private Sub MergeSort(List() As Variant, ColToSort As Long, Scratch() As Variant
 
     ' Empty out whichever list is not already empty.
     Do While i1 <= middle
-        For iCols = iColLower To iColUpper
-            Scratch(iCols, i3) = List(iCols, i1)                    '§§§ inverted i<n> and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    Scratch(iCols, i3) = List(iCols, i1)
+        'Next iCols
+        DataRowCopy List, i1, Scratch, i3
         i1 = i1 + 1
        i3 = i3 + 1
     Loop
     Do While i2 <= max
-        For iCols = iColLower To iColUpper
-            Scratch(iCols, i3) = List(iCols, i2)                    '§§§ inverted i<n> and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    Scratch(iCols, i3) = List(iCols, i2)
+        'Next iCols
+        DataRowCopy List, i2, Scratch, i3
         i2 = i2 + 1
         i3 = i3 + 1
     Loop
 
     ' Move the merged list back into list.
     For i3 = min To max
-        For iCols = iColLower To iColUpper
-            List(iCols, i3) = Scratch(iCols, i3)                    '§§§ inverted i<n> and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    List(iCols, i3) = Scratch(iCols, i3)
+        'Next iCols
+        DataRowCopy Scratch, i3, List, i3
     Next i3
 End Sub
 
@@ -2074,8 +2223,8 @@ Private Sub MergeSortDesc(List() As Variant, ColToSort As Long, Scratch() As Var
     Dim iCols As Long
     
     'Determine the number of Columns of the list
-    Dim iColLower As Long: iColLower = LBound(List)                      '§§§ changed to 1st dimension
-    Dim iColUpper As Long: iColUpper = UBound(List)                      '§§§ changed to 1st dimension
+    Dim iColLower As Long: iColLower = LBound(List)
+    Dim iColUpper As Long: iColUpper = UBound(List)
     
 
     ' If the list has no more than C_CUT_OFF elements,
@@ -2095,15 +2244,17 @@ Private Sub MergeSortDesc(List() As Variant, ColToSort As Long, Scratch() As Var
     i2 = middle + 1 ' Index in list 2
     i3 = min        ' Index in merged list
     Do While i1 <= middle And i2 <= max
-        If List(ColToSort, i1) >= List(ColToSort, i2) Then              '§§§ inverted i<n> and ColToSort
-            For iCols = iColLower To iColUpper
-                Scratch(iCols, i3) = List(iCols, i1)                    '§§§ inverted i<n> and iCols
-            Next iCols
+        If List(ColToSort, i1) >= List(ColToSort, i2) Then
+            'For iCols = iColLower To iColUpper
+            '    Scratch(iCols, i3) = List(iCols, i1)
+            'Next iCols
+            DataRowCopy List, i1, Scratch, i3
             i1 = i1 + 1
         Else
-            For iCols = iColLower To iColUpper
-                Scratch(iCols, i3) = List(iCols, i2)                    '§§§ inverted i<n> and iCols
-            Next iCols
+            'For iCols = iColLower To iColUpper
+            '    Scratch(iCols, i3) = List(iCols, i2)
+            'Next iCols
+            DataRowCopy List, i2, Scratch, i3
             i2 = i2 + 1
         End If
         i3 = i3 + 1
@@ -2111,25 +2262,28 @@ Private Sub MergeSortDesc(List() As Variant, ColToSort As Long, Scratch() As Var
 
     ' Empty out whichever list is not already empty.
     Do While i1 <= middle
-        For iCols = iColLower To iColUpper
-            Scratch(iCols, i3) = List(iCols, i1)                        '§§§ inverted i<n> and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    Scratch(iCols, i3) = List(iCols, i1)
+        'Next iCols
+        DataRowCopy List, i1, Scratch, i3
         i1 = i1 + 1
        i3 = i3 + 1
     Loop
     Do While i2 <= max
-        For iCols = iColLower To iColUpper
-            Scratch(iCols, i3) = List(iCols, i2)                        '§§§ inverted i<n> and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    Scratch(iCols, i3) = List(iCols, i2)
+        'Next iCols
+        DataRowCopy List, i2, Scratch, i3
         i2 = i2 + 1
         i3 = i3 + 1
     Loop
 
     ' Move the merged list back into list.
     For i3 = min To max
-        For iCols = iColLower To iColUpper
-            List(iCols, i3) = Scratch(iCols, i3)                        '§§§ inverted i<n> and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    List(iCols, i3) = Scratch(iCols, i3)
+        'Next iCols
+        DataRowCopy Scratch, i3, List, i3
     Next i3
 End Sub
 
@@ -2142,55 +2296,43 @@ Private Sub InsertionSort(List() As Variant, ColToSort As Long, min As Long, max
     Dim iInnerLoop As Long
     Dim iOuterLoop As Long
     Dim next_item As Variant
-    Dim next_item_rec As Variant
-    Dim temp_rec As Variant
-    Dim temp_rec_1() As Variant
+    Dim next_item_rec() As Variant
     
     Dim iCols As Long
-    Dim iColLower As Long: iColLower = LBound(List)                             '§§§ changed to 1st dimension
-    Dim iColUpper As Long: iColUpper = UBound(List)                             '§§§ changed to 1st dimension
+    Dim iColLower As Long: iColLower = LBound(List)
+    Dim iColUpper As Long: iColUpper = UBound(List)
 
-    ReDim next_item_rec(iColLower To iColUpper)
-    ReDim temp_rec(iColLower To iColUpper)
+    ReDim next_item_rec(iColLower To iColUpper, 1 To 1)
     
     For iOuterLoop = min + 1 To max
         
         'this is the next item / record
-        next_item = List(ColToSort, iOuterLoop)                                 '§§§ inverted iOuterLoop and ColToSort
+        next_item = List(ColToSort, iOuterLoop)
         'For iCols = iColLower To iColUpper
-        '    next_item_rec(iCols) = List(iCols, iOuterLoop)                      '§§§ inverted iOuterLoop and ColToSort
+        '    next_item_rec(iCols) = List(iCols, iOuterLoop)
         'Next iCols
-        DataRowGet List, iOuterLoop, next_item_rec
-
+        DataRowCopy List, iOuterLoop, next_item_rec, 1
+    
         'reorder the items
         For iInnerLoop = iOuterLoop To min + 1 Step -1
-            If next_item < List(ColToSort, iInnerLoop - 1) Then                 '§§§ inverted iInnerLoop and ColToSort
+            If next_item < List(ColToSort, iInnerLoop - 1) Then
                 'For iCols = iColLower To iColUpper
-                '    List(iCols, iInnerLoop) = List(iCols, iInnerLoop - 1)       '§§§ inverted iInnerLoop and iCols
+                '    List(iCols, iInnerLoop) = List(iCols, iInnerLoop - 1)
                 'Next iCols
-                DataRowGet List, iInnerLoop - 1, temp_rec
-                temp_rec_1 = temp_rec
-                DataRowPush List, iInnerLoop, temp_rec_1
-                
+                DataRowMove List, iInnerLoop - 1, iInnerLoop
              Else
                 Exit For
             End If
         Next iInnerLoop
         
         'insert the new item
-        For iCols = iColLower To iColUpper
-            List(iCols, iInnerLoop) = next_item_rec(iCols)                      '§§§ inverted iInnerLoop and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    List(iCols, iInnerLoop) = next_item_rec(iCols)
+        'Next iCols
+        DataRowCopy next_item_rec, 1, List, iInnerLoop
         
     Next iOuterLoop
     
-    'empty out the array holding the temporary records (See ' http://stackoverflow.com/questions/16323776/copy-an-array-reference-in-vba/16343887#16343887)
-    FillMemory next_item_rec, 16, 0
-    FillMemory temp_rec, 16, 0
-    'FillMemory temp_rec_1, 16, 0
-    
-    'Stop
-
 End Sub
 
 
@@ -2202,43 +2344,46 @@ Private Sub InsertionSortDesc(List() As Variant, ColToSort As Long, min As Long,
     Dim iInnerLoop As Long
     Dim iOuterLoop As Long
     Dim next_item As Variant
-    Dim next_item_rec As Variant
+    Dim next_item_rec() As Variant
     
     Dim iCols As Long
-    Dim iColLower As Long: iColLower = LBound(List)                                         '§§§ changed to 1st dimension
-    Dim iColUpper As Long: iColUpper = UBound(List)                                         '§§§ changed to 1st dimension
+    Dim iColLower As Long: iColLower = LBound(List)
+    Dim iColUpper As Long: iColUpper = UBound(List)
 
-    ReDim next_item_rec(iColLower To iColUpper)
+    ReDim next_item_rec(iColLower To iColUpper, 1 To 1)
     
     For iOuterLoop = min + 1 To max
         
         'this is the next item / record
-        next_item = List(ColToSort, iOuterLoop)                                             '§§§ inverted iOuterLoop and ColToSort
-        For iCols = iColLower To iColUpper
-            next_item_rec(iCols) = List(iCols, iOuterLoop)                                  '§§§ inverted iOuterLoop and iCols
-        Next iCols
+        next_item = List(ColToSort, iOuterLoop)
+        'For iCols = iColLower To iColUpper
+        '    next_item_rec(iCols) = List(iCols, iOuterLoop)
+        'Next iCols
+        DataRowCopy List, iOuterLoop, next_item_rec, 1
 
         'reorder the items
         For iInnerLoop = iOuterLoop To min + 1 Step -1
-            If next_item > List(ColToSort, iInnerLoop - 1) Then                             '§§§ inverted iInnerLoop and ColToSort
-                For iCols = iColLower To iColUpper
-                    List(iCols, iInnerLoop) = List(iCols, iInnerLoop - 1)                   '§§§ inverted iInnerLoop and iCols
-                Next iCols
+            If next_item > List(ColToSort, iInnerLoop - 1) Then
+                'For iCols = iColLower To iColUpper
+                '    List(iCols, iInnerLoop) = List(iCols, iInnerLoop - 1)
+                'Next iCols
+                DataRowMove List, iInnerLoop - 1, iInnerLoop
              Else
                 Exit For
             End If
         Next iInnerLoop
         
         'insert the new item
-        For iCols = iColLower To iColUpper
-            List(iCols, iInnerLoop) = next_item_rec(iCols)                                  '§§§ inverted iInnerLoop and iCols
-        Next iCols
+        'For iCols = iColLower To iColUpper
+        '    List(iCols, iInnerLoop) = next_item_rec(iCols)
+        'Next iCols
+        DataRowCopy next_item_rec, 1, List, iInnerLoop
         
     Next iOuterLoop
     
 End Sub
 
-Public Sub SortUnstable(Index As Variant, Direction As String)
+Public Sub SortUnstable(Index As Variant, Optional Direction As String = "asc")
 ' ***********************************************
 ' Pulic call of QuickSort-Algorithm
 ' ***********************************************
@@ -2285,7 +2430,7 @@ Private Sub QuickSort(List() As Variant, ColToSort As Long, Optional ByVal min A
   Dim i As Long
   Dim j As Long
   Dim k As Long
-  Dim H As Variant
+  Dim H() As Variant
   Dim x As Variant
   
   Dim lCStart As Long
@@ -2297,7 +2442,7 @@ Private Sub QuickSort(List() As Variant, ColToSort As Long, Optional ByVal min A
   i = min: j = max
   x = List(ColToSort, (min + max) / 2)
 
-  ReDim H(lCEnd)
+  ReDim H(1 To lCEnd, 1 To 1)
 
   ' Split the array
   Do
@@ -2307,15 +2452,18 @@ Private Sub QuickSort(List() As Variant, ColToSort As Long, Optional ByVal min A
 
     If (i <= j) Then
       ' Flip value pairs
-      For k = lCStart To lCEnd
-        H(k) = List(k, i)
-      Next k
-      For k = lCStart To lCEnd
-        List(k, i) = List(k, j)
-      Next k
-      For k = lCStart To lCEnd
-        List(k, j) = H(k)
-      Next k
+      'For k = lCStart To lCEnd
+      '  H(k) = List(k, i)
+      'Next k
+      DataRowCopy List, i, H, 1
+      'For k = lCStart To lCEnd
+      '  List(k, i) = List(k, j)
+      'Next k
+      DataRowMove List, j, i
+      'For k = lCStart To lCEnd
+      '  List(k, j) = H(k)
+      'Next k
+      DataRowCopy H, 1, List, j
       i = i + 1: j = j - 1
     End If
   Loop Until (i > j)
@@ -2338,7 +2486,7 @@ Private Sub QuickSortDesc(List() As Variant, ColToSort As Long, Optional ByVal m
   Dim i As Long
   Dim j As Long
   Dim k As Long
-  Dim H As Variant
+  Dim H() As Variant
   Dim x As Variant
   
   Dim lCStart As Long
@@ -2350,7 +2498,7 @@ Private Sub QuickSortDesc(List() As Variant, ColToSort As Long, Optional ByVal m
   i = min: j = max
   x = List(ColToSort, (min + max) / 2)
 
-  ReDim H(lCEnd)
+  ReDim H(1 To lCEnd, 1 To 1)
 
   ' Split the array
   Do
@@ -2360,15 +2508,18 @@ Private Sub QuickSortDesc(List() As Variant, ColToSort As Long, Optional ByVal m
 
     If (i >= j) Then
       ' Flip value pairs
-      For k = lCStart To lCEnd
-        H(k) = List(k, i)
-      Next k
-      For k = lCStart To lCEnd
-        List(k, i) = List(k, j)
-      Next k
-      For k = lCStart To lCEnd
-        List(k, j) = H(k)
-      Next k
+      'For k = lCStart To lCEnd
+      '  H(k) = List(k, i)
+      'Next k
+      DataRowCopy List, i, H, 1
+      'For k = lCStart To lCEnd
+      '  List(k, i) = List(k, j)
+      'Next k
+      DataRowMove List, j, i
+      'For k = lCStart To lCEnd
+      '  List(k, j) = H(k)
+      'Next k
+      DataRowCopy H, 1, List, j
       i = i + 1: j = j - 1
     End If
   Loop Until (i < j)
@@ -2478,14 +2629,17 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, Index A
         'we have a unique index - let's check if the item exists
         'if the item exists, return it's position in the table
         '§§§ to be implemented §§§
+        lPointer = m_Columns(iCol).Index.GetNextItem(SearchFor, match, Start)
             
      ElseIf m_Columns(iCol).Index.IndexType = NonUniqueIndex Then
         'we have a non-unique index - let's traverse the index
-        '§§§ to be implemented §§§
+        '§§§ to be implemented - for the time being let's use linear search §§§
+        lPointer = LinearSearch(SearchFor, match, Index, Start)
         
      Else
         'Index Type is not defined properly - use linear search
         lPointer = LinearSearch(SearchFor, match, Index, Start)
+        
     End If
 
 
@@ -2499,7 +2653,7 @@ Private Function LinearSearch(SearchFor As Variant, match As MatchType, Index As
 ' If item is not found, a 0-Pointer is returned.
 ' ************************************************
 
-    Dim target As Variant: target = SearchFor
+    Dim Target As Variant: Target = SearchFor
     Dim i As Long
     Dim iCol As Long
     Dim NumSearches As Long
@@ -2508,14 +2662,14 @@ Private Function LinearSearch(SearchFor As Variant, match As MatchType, Index As
     
     For i = Start To m_NumItems
         'New code using compare function
-        If Compare(m_List(iCol, i), target, match) = True Then
+        If Compare(m_List(iCol, i), Target, match) = True Then
             Exit For
         End If
     Next i
     
     If i > m_NumItems Then
         LinearSearch = 0    ' Not found.
-    ElseIf Compare(m_List(iCol, i), target, match) = False Then
+    ElseIf Compare(m_List(iCol, i), Target, match) = False Then
          LinearSearch = 0    ' Not found.
     Else
         LinearSearch = i    ' Found.
@@ -2669,96 +2823,6 @@ Private Sub Transpose()
 
 End Sub
 
-Private Sub DataRowGet(ByRef List() As Variant, ByVal idx As Long, ByRef slicedArray As Variant)
-' ***********************************************
-' Writes one row of data (in VBA/VB6 data is ordered column wise, therefore we get
-' one conlumn of the array, which is equivalent to one row of data in m_List, as the
-' data is organized column wise as well... :-)) in the passed array
-' ***********************************************
-
-    Dim ptrToArrayVar As LongPtr
-    Dim ptrToSafeArray As LongPtr
-    Dim ptrToArrayData As LongPtr
-    Dim ptrToArrayData2 As LongPtr
-    Dim uSAFEARRAY As SAFEARRAY1D
-    Dim ptrCursor As LongPtr
-    Dim cbElements As Long
-    Dim atsBound1 As Long
-    Dim elSize As Long
-    
-    'determine bound1 of source array (ie row Count)
-    atsBound1 = m_NumCols
-    
-    'get pointer to source array Safearray
-    ptrToArrayVar = VarPtrArray(List) 'does not work that well under VBA
-    CopyMemory ptrToSafeArray, ByVal ptrToArrayVar, PTR_LENGTH
-    'ptrToSafeArray = getSafeArrayDescrPtr(m_List)
-    CopyMemory uSAFEARRAY, ByVal ptrToSafeArray, LenB(uSAFEARRAY)
-    ptrToArrayData = uSAFEARRAY.pvData
-    'determine byte size of source elements
-    cbElements = uSAFEARRAY.cbElements
-
-    'get pointer to destination array Safearray
-    ptrToArrayVar = VarPtr(slicedArray) + 8 'Variant reserves first 8bytes
-    CopyMemory ptrToSafeArray, ByVal ptrToArrayVar, PTR_LENGTH
-    'ptrToSafeArray = getSafeArrayDescrPtr(slicedArray)
-    CopyMemory uSAFEARRAY, ByVal ptrToSafeArray, LenB(uSAFEARRAY)
-    ptrToArrayData2 = uSAFEARRAY.pvData
-
-    'determine elements size
-    elSize = m_NumCols                                                       'UBound(slicedArray, 1) - LBound(slicedArray, 1) + 1
-    'determine start position of data in source array
-    ptrCursor = ptrToArrayData + (((idx - 1) * atsBound1 + LBound(slicedArray, 1) - 1) * cbElements)
-    'Copy source array to destination array
-    CopyMemory ByVal ptrToArrayData2, ByVal ptrCursor, cbElements * elSize
-
-End Sub
-
-Private Sub DataRowPush(ByRef List() As Variant, ByVal idx As Long, ByRef sourceArray() As Variant)
-' ***********************************************
-' Writes one row of data (in VBA/VB6 data is ordered column wise, therefore we get
-' one conlumn of the array, which is equivalent to one row of data in m_List, as the
-' data is organized column wise as well... :-)) from the passed source into the passed destination array
-' ***********************************************
-
-    Dim ptrToArrayVar As LongPtr
-    Dim ptrToSafeArray As LongPtr
-    Dim ptrToArrayData As LongPtr
-    Dim ptrToArrayData2 As LongPtr
-    Dim uSAFEARRAY As SAFEARRAY1D
-    Dim ptrCursor As LongPtr
-    Dim ptrCursorSource As LongPtr
-    Dim cbElements As Long
-    Dim atsBound1 As Long
-    Dim elSize As Long
-    
-    'determine bound1 of source array (ie row Count)
-    atsBound1 = m_NumCols
-    
-    'get pointer to source array Safearray
-    ptrToArrayVar = VarPtrArray(List) 'does not work that well under VBA
-    CopyMemory ptrToSafeArray, ByVal ptrToArrayVar, PTR_LENGTH
-    'ptrToSafeArray = getSafeArrayDescrPtr(m_List)
-    CopyMemory uSAFEARRAY, ByVal ptrToSafeArray, LenB(uSAFEARRAY)
-    ptrToArrayData = uSAFEARRAY.pvData
-    'determine byte size of source elements
-    cbElements = uSAFEARRAY.cbElements
-
-    'get pointer to destination array Safearray
-    ptrToArrayVar = VarPtrArray(sourceArray)
-    CopyMemory ptrToSafeArray, ByVal ptrToArrayVar, PTR_LENGTH
-    CopyMemory uSAFEARRAY, ByVal ptrToSafeArray, LenB(uSAFEARRAY)
-    ptrToArrayData2 = uSAFEARRAY.pvData
-
-    'determine elements size
-    elSize = m_NumCols                                                       'UBound(sourceArray, 1) - LBound(sourceArray, 1) + 1
-    'determine start position of data in source array
-    ptrCursor = ptrToArrayData + (((idx - 1) * atsBound1 + LBound(sourceArray, 1) - 1) * cbElements)
-    'Copy source array to destination array
-    CopyMemory ByVal ptrCursor, ByVal ptrToArrayData2, cbElements * elSize
-
-End Sub
-
 
 
 Private Function DimensionCount(ByRef ArrayToCheck As Variant) As Integer
@@ -2798,6 +2862,156 @@ End Function
 '#======================================================================================================================
 '# General routines
 '#======================================================================================================================
+
+Private Sub ItemRead(ByRef vItem As Variant, ByVal iCol As Long, ByVal position As Long)
+' ***********************************************
+' Returns a given single value
+' ***********************************************
+    
+
+    If m_EnableObjects Then
+        If IsObject(m_List(iCol, position)) Then
+            Set vItem = m_List(iCol, position)
+         Else
+            vItem = m_List(iCol, position)
+        End If
+     Else
+        vItem = m_List(iCol, position)
+    End If
+
+
+End Sub
+
+
+Private Sub ItemWrite(vValue As Variant, ByVal iCol As Long, ByVal position As Long)
+' ***********************************************
+' Writes a given single value to a given position
+' ***********************************************
+
+
+    If m_EnableObjects Then
+        If IsObject(vValue) Then
+            Set m_List(iCol, position) = vValue
+         Else
+            m_List(iCol, position) = vValue
+        End If
+     Else
+        m_List(iCol, position) = vValue
+    End If
+
+
+End Sub
+
+Private Sub RecordRead(ByRef returnRec() As Variant, ByVal position As Long)
+' ***********************************************
+' Returns a given single row of data
+' ***********************************************
+
+    Dim iCol As Long
+    
+    If m_EnableObjects Then
+        For iCol = 1 To m_NumCols
+            ' Return the record.
+            If IsObject(m_List(iCol, position)) Then
+                Set returnRec(iCol) = m_List(iCol, position)
+             Else
+                returnRec(iCol) = m_List(iCol, position)
+            End If
+        Next iCol
+     Else
+        For iCol = 1 To m_NumCols
+            ' Return the record.
+            returnRec(iCol) = m_List(iCol, position)
+        Next iCol
+    End If
+
+End Sub
+
+
+Private Sub RecordWrite(position As Long, Record() As Variant, iColOffset As Long)
+' ***********************************************
+' Writes a given single row of data to a given position
+' ***********************************************
+
+
+    Dim iCol As Long
+
+    If m_EnableObjects Then
+        'add the record to the list
+        For iCol = 1 To m_NumCols
+                If IsObject(Record(iCol + iColOffset)) Then
+                    Set m_List(iCol, position) = Record(iCol + iColOffset)
+                 Else
+                    m_List(iCol, position) = Record(iCol + iColOffset)
+                End If
+        Next iCol
+     Else
+        'add the record to the list
+        For iCol = 1 To m_NumCols
+                m_List(iCol, position) = Record(iCol + iColOffset)
+        Next iCol
+    End If
+
+
+End Sub
+
+Private Sub DataRowCopy(ByRef Source() As Variant, idxFrom As Long, ByRef Target() As Variant, idxTo As Long)
+' ***********************************************
+' Copies a given single row of data from a given position
+' in a source array into a given target array
+' ***********************************************
+
+    Dim iCol As Long
+
+    If m_EnableObjects Then
+        'add the record to the list
+        For iCol = 1 To m_NumCols
+                If IsObject(Source(iCol, idxFrom)) Then
+                    Set Target(iCol, idxTo) = Source(iCol, idxFrom)
+                 Else
+                    Target(iCol, idxTo) = Source(iCol, idxFrom)
+                End If
+        Next iCol
+     Else
+        'add the record to the list
+        For iCol = 1 To m_NumCols
+                Target(iCol, idxTo) = Source(iCol, idxFrom)
+        Next iCol
+    End If
+
+
+End Sub
+
+Private Sub DataRowMove(ByRef List() As Variant, idxFrom As Long, idxTo As Long)
+' ***********************************************
+' Moves a given single row of data from a given source
+' position to a given target position in an array
+' ***********************************************
+
+
+    Dim iCol As Long
+
+    If m_EnableObjects Then
+        'add the record to the list
+        For iCol = 1 To m_NumCols
+                If IsObject(List(iCol, idxFrom)) Then
+                    Set List(iCol, idxTo) = List(iCol, idxFrom)
+                 Else
+                    List(iCol, idxTo) = List(iCol, idxFrom)
+                End If
+        Next iCol
+     Else
+        'add the record to the list
+        For iCol = 1 To m_NumCols
+                List(iCol, idxTo) = List(iCol, idxFrom)
+        Next iCol
+    End If
+
+
+
+End Sub
+
+
 
 Private Function GetColumnIndex(ByVal Index As String) As Long
 ' ***********************************************
@@ -2850,12 +3064,6 @@ Private Function IsTableColumn(ByVal Index As String) As Boolean
 
 End Function
 
-
-'#Region
-'#======================================================================================================================
-'# Service Routines
-'#======================================================================================================================
-
 Private Sub SetSortedColumn(Index As Long)
 ' ***********************************************
 ' Sets the "IsSorted" flag for a given column
@@ -2875,7 +3083,12 @@ Private Sub SetSortedColumn(Index As Long)
 End Sub
 
 
-Private Function Compare(value As Variant, ByVal CompareWith As Variant, Comparison As MatchType) As Boolean
+'#Region
+'#======================================================================================================================
+'# Service Routines
+'#======================================================================================================================
+
+Private Function Compare(Value As Variant, ByVal CompareWith As Variant, Comparison As MatchType) As Boolean
 ' ***********************************************
 ' Compares Value1 (value) with Value2 (CompareWith) and
 ' returns TRUE if specific comparison is positive
@@ -2891,28 +3104,28 @@ Private Function Compare(value As Variant, ByVal CompareWith As Variant, Compari
     Select Case Comparison
     
         Case Equals
-            If value = CompareWith Then Compare = True
+            If Value = CompareWith Then Compare = True
         Case DoesNotEqual
-            If value <> CompareWith Then Compare = True
+            If Value <> CompareWith Then Compare = True
         Case GreaterThen
-            If value > CompareWith Then Compare = True
+            If Value > CompareWith Then Compare = True
         Case GreaterThenOrEqual
-            If value >= CompareWith Then Compare = True
+            If Value >= CompareWith Then Compare = True
         Case LessThen
-            If value < CompareWith Then Compare = True
+            If Value < CompareWith Then Compare = True
         Case LessThenOrEqual
-            If value <= CompareWith Then Compare = True
+            If Value <= CompareWith Then Compare = True
         Case MatchesPattern, DoesNotMatchPattern
-            stValue = value
+            stValue = Value
             stCompareWith = CompareWith
-            Compare = PatternComparison(value, CompareWith, Comparison)
+            Compare = PatternComparison(Value, CompareWith, Comparison)
         Case Else
             'nothing to do
     End Select
 
 End Function
 
-Private Function PatternComparison(ByVal value As String, ByVal CompareWith As String, Comparison As MatchType) As Boolean
+Private Function PatternComparison(ByVal Value As String, ByVal CompareWith As String, Comparison As MatchType) As Boolean
 ' ***********************************************
 ' Compares Value1 (value) with Value2 (CompareWith) and
 ' returns TRUE if specific comparison is positive
@@ -2947,7 +3160,7 @@ Private Function PatternComparison(ByVal value As String, ByVal CompareWith As S
     
     'outer check - compare begins with
     If beginsWith = True Then
-       If Left$(value, Len(aMatchWords(LBound(aMatchWords)))) = aMatchWords(LBound(aMatchWords)) Then
+       If Left$(Value, Len(aMatchWords(LBound(aMatchWords)))) = aMatchWords(LBound(aMatchWords)) Then
             If Comparison = MatchesPattern Then
                 'Continue...
              Else
@@ -2969,7 +3182,7 @@ Private Function PatternComparison(ByVal value As String, ByVal CompareWith As S
         
     'outer check - compare ends with
     If endsWith = True Then
-       If Right$(value, Len(aMatchWords(UBound(aMatchWords)))) = aMatchWords(UBound(aMatchWords)) Then
+       If Right$(Value, Len(aMatchWords(UBound(aMatchWords)))) = aMatchWords(UBound(aMatchWords)) Then
             If Comparison = MatchesPattern Then
                 'Continue...
              Else
@@ -2992,7 +3205,7 @@ Private Function PatternComparison(ByVal value As String, ByVal CompareWith As S
     
     'main loop of single patterns
     For i = LBound(aMatchWords) To UBound(aMatchWords)
-        iMatch = InStr(iPrevMatch, value, aMatchWords(i))
+        iMatch = InStr(iPrevMatch, Value, aMatchWords(i))
         If iMatch > 0 Then
             matchWord = True
             iPrevMatch = iMatch + 1
@@ -3050,89 +3263,6 @@ Private Function getSafeArrayStructPtr(ByRef varInput As Variant) As LongPtr
 
 End Function
 
-
-
-
-'Gets and copies a SafeArray for debugging output
-Private Sub DebugSafeArray(ArrayInput As Variant)
-    'Dim MyArray() As Long
-    Dim SafeArray As SAFEARRAY1D
-    Dim SafeArray2 As SAFEARRAY2D
-    Dim lDimensions As Long
-    Dim PointerToPointer As LongPtr
-    Dim PointerToSafeArray As LongPtr
-
-    lDimensions = DimensionCount(ArrayInput)
-    
-    'Ersten Zeiger ermitteln
-    PointerToPointer = getSafeArrayDescrPtr(ArrayInput)
-    
-    'Zweiten Zeiger auslesen
-    Call CopyMemory(PointerToSafeArray, ByVal PointerToPointer, 4&)
-    
-    
-    If lDimensions = 0 Then
-        Debug.Print "Array not initialized!"
-     ElseIf lDimensions = 1 Then
-        'SafeArray in vorgegebene Strukur kopieren
-        Call CopyMemory(SafeArray, ByVal PointerToSafeArray, _
-        Len(SafeArray))
-        'Resultat ausgeben
-        Call DisplaySafeArray1D(SafeArray)
-     ElseIf lDimensions = 2 Then
-        'SafeArray in vorgegebene Strukur kopieren
-        Call CopyMemory(SafeArray2, ByVal PointerToSafeArray, _
-        Len(SafeArray2))
-        'Resultat ausgeben
-        Call DisplaySafeArray2D(SafeArray2)
-    End If
-    
-End Sub
-
-'Prints a given SafeArray structure - 1 dimensional
-Private Sub DisplaySafeArray1D(SA As SAFEARRAY1D)
-  
-  Dim H As String
-    
-        H = ".cDims = " & SA.cDims & vbCrLf
-        H = H & ".fFeatures = " & SA.fFeatures & vbCrLf
-        H = H & ".cbElements = " & SA.cbElements & vbCrLf
-        H = H & ".cLocks = " & SA.cLocks & vbCrLf
-        H = H & ".pvData = " & SA.pvData & vbCrLf
-    
-        H = H & ".Bounds(0).cElements = " & SA.Bounds(0).cElements & vbCrLf
-
-        H = H & ".Bounds(0).lLbound = " & SA.Bounds(0).lLbound & vbCrLf
-        
-    Debug.Print H
-    
-End Sub
-
-
-'Prints a given SafeArray structure - 1 dimensional
-Private Sub DisplaySafeArray2D(SA As SAFEARRAY2D)
-  
-  Dim H As String
-    
-        H = ".cDims = " & SA.cDims & vbCrLf
-        H = H & ".fFeatures = " & SA.fFeatures & vbCrLf
-        H = H & ".cbElements = " & SA.cbElements & vbCrLf
-        H = H & ".cLocks = " & SA.cLocks & vbCrLf
-        H = H & ".pvData = " & SA.pvData & vbCrLf
-    
-        H = H & ".Bounds(0).cElements = " & SA.Bounds(0).cElements & vbCrLf
-        H = H & ".Bounds(1).cElements = " & SA.Bounds(1).cElements & vbCrLf
-        
-        H = H & ".Bounds(0).lLbound = " & SA.Bounds(0).lLbound & vbCrLf
-        H = H & ".Bounds(1).lLbound = " & SA.Bounds(1).lLbound & vbCrLf
-       
-    Debug.Print H
-    
-End Sub
-
-
-
-
 Private Function GetVarType(myVar) As String
 
 ' ---------------------------------------------------------------
@@ -3181,4 +3311,210 @@ Private Function GetVarType(myVar) As String
 
 End Function
 
+
+Private Sub SplitCSV(Expression As String, ResultSplit() As String, ResultCols As Long, ResultRows As Long, Optional ColumnDelimiter As String = ",", Optional RowDelimiter As String = vbNewLine, Optional Quote As String = """")
+'*************************************************************
+' returns one dimensional zero based string array in ResultSplit containing parsed CSV cells
+' - ResultCols (in/out) number of columns; if positive on input the CSV data is fixed to given number of columns
+' - ResultRows (out) number of rows
+' - (C): VBForums / User: Merri - http://www.vbforums.com/showthread.php?604031-Fast-amp-correctly-reading-CSV-parser-(Comma-separated-values)
+'*************************************************************
+
+    Dim CSV() As Integer, HeaderCSV(0 To 5) As Long, lngCSV As Long
+    ' general variables that we need
+    Dim intColumn As Integer, intQuote As Integer, lngRow As Long, strRow As String
+    Dim lngExpLen As Long, lngRowLen As Long
+    Dim blnQuote As Boolean, lngA As Long, lngB As Long, lngC As Long, lngCount As Long, lngResults() As Long
+    ' some dummy variables that we happen to need
+    Dim Compare As VbCompareMethod, SafeArrayBound(1) As Long
+    ' length information
+    lngExpLen = LenB(Expression)
+    lngRowLen = LenB(RowDelimiter)
+    ' validate lengths
+    If lngExpLen > 0 And lngRowLen > 0 Then
+        ' column delimiter
+        If LenB(ColumnDelimiter) Then intColumn = AscW(ColumnDelimiter): ColumnDelimiter = Left$(ColumnDelimiter, 1) Else intColumn = 44: ColumnDelimiter = ","
+        ' quote character
+        If LenB(Quote) Then intQuote = AscW(Quote): Quote = Left$(Quote, 1) Else intQuote = 34: Quote = """"
+        ' maximum number of results
+        ReDim lngResults(0 To (lngExpLen \ lngRowLen))
+        ' prepare CSV array
+        HeaderCSV(0) = 1
+        HeaderCSV(1) = 2
+        HeaderCSV(3) = StrPtr(Expression)
+        HeaderCSV(4) = Len(Expression)
+        ' assign Expression data to the Integer array
+        lngCSV = ArrayPtr(CSV)
+        PutMem4 lngCSV, VarPtr(HeaderCSV(0))
+        ' find first row delimiter, see if within quote or not
+        lngA = InStrB(1, Expression, RowDelimiter, Compare)
+        Do Until (lngA And 1) Or (lngA = 0)
+            lngA = InStrB(lngA + 1, Expression, RowDelimiter, Compare)
+        Loop
+        lngB = InStrB(1, Expression, Quote, Compare)
+        Do Until (lngB And 1) Or (lngB = 0)
+            lngB = InStrB(lngB + 1, Expression, Quote, Compare)
+        Loop
+        Do While lngA > 0
+            If lngA + lngRowLen <= lngB Or lngB = 0 Then
+                lngResults(lngCount) = lngA
+                lngA = InStrB(lngA + lngRowLen, Expression, RowDelimiter, Compare)
+                Do Until (lngA And 1) Or (lngA = 0)
+                    lngA = InStrB(lngA + 1, Expression, RowDelimiter, Compare)
+                Loop
+                If lngCount Then
+                    lngCount = lngCount + 1
+                Else
+                    ' calculate number of resulting columns if invalid number of columns
+                    If ResultCols < 1 Then
+                        ResultCols = 1
+                        intColumn = AscW(ColumnDelimiter)
+                        For lngC = 0 To (lngResults(0) - 1) \ 2
+                            If blnQuote Then
+                                If CSV(lngC) <> intQuote Then Else blnQuote = False
+                            Else
+                                Select Case CSV(lngC)
+                                    Case intQuote
+                                        blnQuote = True
+                                    Case intColumn
+                                        ResultCols = ResultCols + 1
+                                End Select
+                            End If
+                        Next lngC
+                    End If
+                    lngCount = 1
+                End If
+            Else
+                lngB = InStrB(lngB + 2, Expression, Quote, Compare)
+                Do Until (lngB And 1) Or (lngB = 0)
+                    lngB = InStrB(lngB + 1, Expression, Quote, Compare)
+                Loop
+                If lngB Then
+                    lngA = InStrB(lngB + 2, Expression, RowDelimiter, Compare)
+                    Do Until (lngA And 1) Or (lngA = 0)
+                        lngA = InStrB(lngA + 1, Expression, RowDelimiter, Compare)
+                    Loop
+                    If lngA Then
+                        lngB = InStrB(lngB + 2, Expression, Quote, Compare)
+                        Do Until (lngB And 1) Or (lngB = 0)
+                            lngB = InStrB(lngB + 1, Expression, Quote, Compare)
+                        Loop
+                    End If
+                End If
+            End If
+        Loop
+        lngResults(lngCount) = lngExpLen + 1
+        ' number of rows
+        ResultRows = lngCount + 1
+        ' string array items to return
+        ReDim Preserve ResultSplit(0 To ResultRows * ResultCols - 1)
+        ' first row
+        lngCount = 0
+        strRow = LeftB$(Expression, lngResults(0) - 1)
+        HeaderCSV(3) = StrPtr(strRow)
+        lngC = 0
+        blnQuote = False
+        For lngB = 0 To (lngResults(0) - 1) \ 2
+            If blnQuote Then
+                Select Case CSV(lngB)
+                    Case intQuote
+                        If CSV(lngB + 1) = intQuote Then
+                            ' skip next char (quote)
+                            lngB = lngB + 1
+                            ' add quote char
+                            CSV(lngC) = intQuote
+                            lngC = lngC + 1
+                        Else
+                            blnQuote = False
+                        End If
+                    Case Else
+                        ' add this char
+                        If lngB > lngC Then CSV(lngC) = CSV(lngB)
+                        lngC = lngC + 1
+                End Select
+            Else
+                Select Case CSV(lngB)
+                    Case intQuote
+                        blnQuote = True
+                    Case intColumn
+                        ' add this column
+                        ResultSplit(lngCount) = Left$(strRow, lngC)
+                        ' max column reached?
+                        lngCount = lngCount + 1
+                        If lngCount >= ResultCols Then Exit For
+                        ' start filling column string buffer from start (strRow)
+                        lngC = 0
+                    Case Else
+                        ' add this char
+                        If lngB > lngC Then CSV(lngC) = CSV(lngB)
+                        lngC = lngC + 1
+                End Select
+            End If
+        Next lngB
+        ' add last column item?
+        If lngCount < ResultCols Then ResultSplit(lngCount) = Left$(strRow, lngC - 1)
+        ' rows after first
+        For lngA = 1 To ResultRows - 1
+            ' start index for columns
+            lngRow = lngA * ResultCols
+            lngCount = 0
+            strRow = MidB$(Expression, lngResults(lngA - 1) + lngRowLen, lngResults(lngA) - lngResults(lngA - 1) - lngRowLen)
+            HeaderCSV(3) = StrPtr(strRow)
+            lngC = 0
+            blnQuote = False
+            For lngB = 0 To (lngResults(lngA) - lngResults(lngA - 1) - lngRowLen) \ 2
+                If blnQuote Then
+                    Select Case CSV(lngB)
+                        Case intQuote
+                            If CSV(lngB + 1) = intQuote Then
+                                ' skip next char (quote)
+                                lngB = lngB + 1
+                                ' add quote char
+                                CSV(lngC) = intQuote
+                                lngC = lngC + 1
+                            Else
+                                blnQuote = False
+                            End If
+                        Case Else
+                            ' add this char
+                            CSV(lngC) = CSV(lngB)
+                            lngC = lngC + 1
+                    End Select
+                Else
+                    Select Case CSV(lngB)
+                        Case intQuote
+                            blnQuote = True
+                        Case intColumn
+                            ' add this column
+                            ResultSplit(lngRow + lngCount) = Left$(strRow, lngC)
+                            ' max column reached?
+                            lngCount = lngCount + 1
+                            If lngCount >= ResultCols Then Exit For
+                            ' start filling column string buffer from start (strRow)
+                            lngC = 0
+                        Case Else
+                            ' add this char
+                            If lngB > lngC Then CSV(lngC) = CSV(lngB)
+                            lngC = lngC + 1
+                    End Select
+                End If
+            Next lngB
+            ' add last column item?
+            If lngCount < ResultCols Then ResultSplit(lngRow + lngCount) = Left$(strRow, lngC - 1)
+        Next lngA
+        ' clean up CSV array
+        PutMem4 lngCSV, 0
+    Else
+        ResultCols = 0
+        ResultRows = 0
+        ' clean any possible data that exists in the passed string array (like if it is multidimensional)
+        If Not Not ResultSplit Then Erase ResultSplit
+        ' mysterious IDE error fix
+        'Debug.Assert App.hInstance
+        ' reset to one element, one dimension
+        ReDim ResultSplit(0 To 0)
+        ' custom redimension: remove the items (this duplicates the VB6 Split behavior)
+        SafeArrayRedim Not Not ResultSplit, SafeArrayBound(0)
+    End If
+End Sub
 
