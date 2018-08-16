@@ -80,7 +80,7 @@ End Enum
 '# Private Variables
 '#======================================================================================================================
 Private m_IndexUnique As cHashTable             'The actual index itself - if it's a unique index
-Private m_IndexNonUniuqe As cBPlusTree          'The actual index itself - if it's a non unique index
+'Private m_IndexNonUniuqe As cBPlusTree          'The actual index itself - if it's a non unique index
 Private m_Index As Object                       'The generic representation of the index itself
 Private m_IndexType As IndexType                'The type of the index
 Private m_Name As String
@@ -111,7 +111,7 @@ Private Sub Class_Terminate()
 
     'Debug.Print "|> Terminating:= " & Me.Name
     Set m_IndexUnique = Nothing
-    Set m_IndexNonUniuqe = Nothing
+    'Set m_IndexNonUniuqe = Nothing
     Set m_Index = Nothing
     
 
@@ -195,7 +195,7 @@ Public Sub Create(ByRef DataTable As cDataTable, Column As String)
         
         If m_IndexType = UniqueIndex Then
             Set m_IndexUnique = New cHashTable
-            'm_IndexUnique.SetSize
+            m_IndexUnique.SetSize DataTable.NumItems * 1.5
             DataTable.RsMoveFirst
             Do While Not DataTable.RsEOF
                 stValue = DataTable.Item(Column)

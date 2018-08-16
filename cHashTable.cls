@@ -66,7 +66,11 @@ Option Explicit
 '#======================================================================================================================
 '# References
 '#======================================================================================================================
-Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (dest As Any, Source As Any, ByVal bytes As Long)
+#If Win64 Then
+    Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (dest As Any, Source As Any, ByVal bytes As LongPtr)
+#Else
+    Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (dest As Any, Source As Any, ByVal bytes As Long)
+#End If
 
 
 '#======================================================================================================================

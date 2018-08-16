@@ -78,6 +78,8 @@ Option Base 1
 '#======================================================================================================================
 '# Application Constants, Enumerations & Types
 '#======================================================================================================================
+#Const C_CON_OFFICE_APP = "XLS"   '##### CHANGE THIS TO ANYTHING ELSE THEN 'XLS' WHEN NOT USING THIS CLASS IN EXCEL #####
+
 Const C_WANT_FREE_PERCENT = 0.1   ' 0.1 translates in 10% free space
 Const C_MIN_FREE = 10             ' Min unused space when resizing
 Const C_MAX_WAIT_CYCLES = 100     ' Number of iterations to check if object is locked before throwing time out error
@@ -88,11 +90,6 @@ Private Const C_CUT_OFF As Long = 100 'move into Insertionsort if list (or subli
 Private Const C_Name As String = "cDataTable"
 
 
-Private Enum ResizeType
-    IncludingWantFreeSpace = 1
-    WithoutEmptyTrailRecords = 2
-End Enum
-
 Public Enum MatchType
     Equals = 1
     DoesNotEqual = 2
@@ -102,6 +99,17 @@ Public Enum MatchType
     GreaterThenOrEqual = 6
     LessThen = 7
     LessThenOrEqual = 8
+End Enum
+
+Public Enum OutputType
+    OverwriteIfExists = 1
+    AppendIfExists = 2
+    ErrorIfExists = 3
+End Enum
+
+Private Enum ResizeType
+    IncludingWantFreeSpace = 1
+    WithoutEmptyTrailRecords = 2
 End Enum
 
 Private Enum ColumnType
@@ -197,7 +205,7 @@ Private m_IsDirty As Boolean                    ' Indicates if the array needs c
 Private m_IsLocked As Boolean                   ' Indicates if the class is currently being updated
 Private m_BOF As Boolean                        ' Indicates that the cursor has reached the beginning of the table
 Private m_EOF As Boolean                        ' Indicates that the cursor has reached the end of the table
-Private m_Errors(1 To 9) As ErrorCode           ' List of all error codes
+Private m_Errors(1 To 10) As ErrorCode          ' List of all error codes
 
 '#Region
 '#======================================================================================================================
@@ -239,10 +247,11 @@ Private Sub Class_Initialize()
     m_Errors(3).errNumber = 515:  m_Errors(3).errDescrption = "The no of items in the input record does not match the number of columns in the data table!"
     m_Errors(4).errNumber = 516:  m_Errors(4).errDescrption = "Assigning a value to an item out of boundaries of the data table is not possible!"
     m_Errors(5).errNumber = 517:  m_Errors(5).errDescrption = "The column name you specified could not be found in the data table!"
-    m_Errors(6).errNumber = 518:  m_Errors(6).errDescrption = "Accessing an item needs either a row number or an active cursor from one of the Rec... methods"
+    m_Errors(6).errNumber = 518:  m_Errors(6).errDescrption = "Accessing an item needs either a row number or an active cursor from one of the RsXxxx methods!"
     m_Errors(7).errNumber = 519:  m_Errors(7).errDescrption = "The two defined tables do not have the same data structure. Cannot append two tables with different data strucutres!"
     m_Errors(8).errNumber = 520:  m_Errors(8).errDescrption = "No of records in Data Table exeed excel row limit! Use compression mode to output bigger data sets."
     m_Errors(9).errNumber = 901:  m_Errors(9).errDescrption = "Timeout/Deadlock - the data table is locked for update, time limit exeeded!"
+    m_Errors(10).errNumber = 521:  m_Errors(10).errDescrption = "Output File already exists!"
     
 
 End Sub
@@ -1086,6 +1095,8 @@ Public Sub RecordRemove(ByVal position As Long)
 End Sub
 
 
+#If C_CON_OFFICE_APP = "XLS" Then
+
 Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
 ' ***********************************************
 ' Add a cell range to the empty table
@@ -1209,6 +1220,8 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         
         
 End Sub
+
+#End If
 
 Public Sub LoadDelimTextFile(filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """")
 ' ***********************************************
@@ -1682,6 +1695,9 @@ Public Sub RsFindFirst(Index As Variant, match As MatchType, Criteria As Variant
     'from the beginning of the table
     m_Bookmark = -1
     
+    'set End of File lag to false as we start search from scratch
+    m_EOF = False
+    
     'Find the next matching record
     RsFind Index, match, Criteria
 
@@ -1783,7 +1799,7 @@ End Function
 '#======================================================================================================================
 '# Data Output
 '#======================================================================================================================
-
+#If C_CON_OFFICE_APP = "XLS" Then
 
 Public Sub DumpToRange(TargetWorksheet As Worksheet, TargetCell As Range, Optional IncludeHeader As Boolean = True, Optional CompressOnRowOverflow As Boolean = False)
 ' ***********************************************
@@ -2011,29 +2027,56 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
 
 End Sub
 
+#End If
 
-Public Sub DumpToFile(TargetFile As String, Delimiter As String)
+
+Public Sub DumpToFile(TargetFile As String, Delimiter As String, Optional IncludeHeader As Boolean = True, Optional OutputMode As OutputType = OverwriteIfExists)
 ' ***********************************************
 ' Output the array to a text file applying any
 ' given delimiter
 ' ***********************************************
         
-        Dim fn As Integer
-        Dim stRecored As String
-        Dim i As Long
-        Dim ii As Long
-        Dim stRecord As String
-        
-        If m_IsDirty = True Then
-            Call CleanUpTable
-        End If
+    Dim fn As Integer
+    Dim stRecored As String
+    Dim i As Long
+    Dim ii As Long
+    Dim stRecord As String
+    Dim stHeader As Variant
+    
+    If m_IsDirty = True Then
+        Call CleanUpTable
+    End If
         
     fn = VBA.FreeFile
         
-    Open TargetFile For Output As #fn
+    If OutputMode = OverwriteIfExists Then
+        Open TargetFile For Output As #fn
+     ElseIf OutputMode = AppendIfExists Then
+        Open TargetFile For Append As #fn
+     ElseIf OutputMode = ErrorIfExists Then
+        'check if file exists
+        If Dir(TargetFile) <> "" Then
+            Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
+        End If
+     Else
+        Open TargetFile For Output As #fn
+    End If
         
+        'Output the header if required
+        stRecord = ""
+        For Each stHeader In Me.Headers
+            If LenB(stRecord) = 0 Then
+                    stRecord = stHeader
+             Else
+                    stRecord = stRecord & Delimiter & stHeader
+            End If
+        Next
+        Print #fn, stRecord
+        
+        'output the records
+        stRecord = ""
         For i = 1 To UBound(m_ListTransposed)
-                For ii = 1 To UBound(m_ListTransposed, 1)
+                For ii = 1 To UBound(m_ListTransposed, 2)
                         'construct the record ...
                         If LenB(stRecord) = 0 Then
                                 stRecord = m_ListTransposed(i, ii)
@@ -2642,6 +2685,7 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, Index A
         
     End If
 
+    IndexedSearch = lPointer
 
 End Function
 
