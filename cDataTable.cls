@@ -533,10 +533,26 @@ Public Property Get Item(Index As Variant, Optional Row As Long = -1) As Variant
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
-        Item = ItemGet(Row, CStr(Index))
+        If m_EnableObjects = True Then
+            If IsObject(ItemGet(Row, CStr(Index))) Then
+                Set Item = ItemGet(Row, CStr(Index))
+             Else
+                Item = ItemGet(Row, CStr(Index))
+            End If
+         Else
+            Item = ItemGet(Row, CStr(Index))
+        End If
      ElseIf m_Bookmark > -1 Then
         'we have a valid bookmark so let's use this
-        Item = ItemGet(m_Bookmark, CStr(Index))
+        If m_EnableObjects = True Then
+            If IsObject(ItemGet(m_Bookmark, CStr(Index))) Then
+                Set Item = ItemGet(m_Bookmark, CStr(Index))
+             Else
+                Item = ItemGet(m_Bookmark, CStr(Index))
+            End If
+         Else
+            Item = ItemGet(m_Bookmark, CStr(Index))
+        End If
      Else
         MsgBox "Unhandled condition in Property Get 'Item'", vbCritical
         Exit Property
@@ -742,7 +758,7 @@ Public Sub AnalyzeDataTypes()
 ' and determine the data type of the column
 ' ***********************************************
 
-    '§§§ Future feature §§§
+    'Â§Â§Â§ Future feature Â§Â§Â§
         
     Dim iCol As Long
     Dim dblPctSampleSize As Double: dblPctSampleSize = 0.1
@@ -759,14 +775,14 @@ Public Sub AnalyzeDataTypes()
         Me.RsBookmark = lStepSize * lCount
         Do While Not Me.RsEOF
             'determine type & keep statistics
-            '§§§ pending implementation §§§
+            'Â§Â§Â§ pending implementation Â§Â§Â§
             
          lCount = lCount + 1
          Me.RsBookmark = lStepSize * lCount
         Loop
     
         'get entry with most counts
-        '§§§ pending implementation §§§
+        'Â§Â§Â§ pending implementation Â§Â§Â§
         
         'update the data type of the column
         m_Columns(iCol).Type = tyCol
@@ -806,7 +822,7 @@ End Sub
 ' Refresh all indices in the table
 ' ***********************************************
 
-        '§§§ Future feature §§§
+        'Â§Â§Â§ Future feature Â§Â§Â§
 
 'End Sub
 
@@ -815,7 +831,7 @@ End Sub
 ' Refresh all stats and indices
 ' ***********************************************
 
-        '§§§ Future feature §§§
+        'Â§Â§Â§ Future feature Â§Â§Â§
 
 'End Sub
 
@@ -852,6 +868,7 @@ Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Varia
 ' ***********************************************
 
     Dim iCol As Long
+    Dim vItemTmp As Variant
     'Dim bColFound As Boolean: bColFound = False
 
     'handle thread safety
@@ -872,9 +889,18 @@ Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Varia
          Else
             ' Return the item.
             'ItemGet = m_List(iCol, position)
-            ItemRead ItemGet, iCol, position
+            ItemRead vItemTmp, iCol, position
         End If
-                
+        
+        If m_EnableObjects = True Then
+            If IsObject(vItemTmp) Then
+                Set ItemGet = vItemTmp
+             Else
+                ItemGet = vItemTmp
+            End If
+         Else
+            ItemGet = vItemTmp
+         End If
     End If
         
     'handle thread safety
@@ -977,12 +1003,14 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
         Dim iCol As Long
         Dim iColOffset As Integer: iColOffset = 0
         Dim lNoOfCols As Long
+        Dim aRecTmp As Variant
 
     
         'Check if 1st element of ParamArray is an array itself,
         'if yes make the 1st element the record
         If IsArray(Record(0)) Then
-            Record = Record(0)
+            aRecTmp = Record(0)
+            Record = aRecTmp
         End If
     
     
@@ -1121,7 +1149,7 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         Dim want_free As Long
         
         
-        Dim mTimer As New cStopWatch
+        Dim mTimer As New CStopWatch
 
         
         'handle thread safety
@@ -1349,7 +1377,7 @@ Public Sub AppendToTable(ByRef tSource As cDataTable)
     
     ReDim arrFieldMapping(1 To lSourceColCount, 1 To 2)
     
-    '§§§ UNDER CONSTRUCTION !!! §§§
+    'Â§Â§Â§ UNDER CONSTRUCTION !!! Â§Â§Â§
     
     
     '1. Check if structure is the same
@@ -1403,7 +1431,7 @@ Public Sub AppendToTable(ByRef tSource As cDataTable)
     '2.
 
 
-    '§§§ UNDER CONSTRUCTION !!! §§§
+    'Â§Â§Â§ UNDER CONSTRUCTION !!! Â§Â§Â§
 
 
 End Sub
@@ -1743,17 +1771,17 @@ Private Sub RsFind(Index As Variant, match As MatchType, Criteria As Variant)
         m_EOF = True
     End If
     
-    '§§§
-    '§§§ CONSTRUCTION SITE!! NEED TO FIGURE OUT HOW TO RESOLVE THE CRITERIA INTO A EXECUTABLE SEARCH!! §§§
-    '§§§ TEMPORARY SOLUTION IS TO USE LINEAR SEARCH ON ONE COLUMN ONLY... §§§
-    '§§§
+    'Â§Â§Â§
+    'Â§Â§Â§ CONSTRUCTION SITE!! NEED TO FIGURE OUT HOW TO RESOLVE THE CRITERIA INTO A EXECUTABLE SEARCH!! Â§Â§Â§
+    'Â§Â§Â§ TEMPORARY SOLUTION IS TO USE LINEAR SEARCH ON ONE COLUMN ONLY... Â§Â§Â§
+    'Â§Â§Â§
     
 '    For iIdx = lPointer To m_NumItems
 '    Next iIdx
 
-    '§§§
-    '§§§ END OF CONSTRUCTION SITE
-    '§§§
+    'Â§Â§Â§
+    'Â§Â§Â§ END OF CONSTRUCTION SITE
+    'Â§Â§Â§
 
 
 End Sub
@@ -1776,7 +1804,7 @@ Public Function SelectData(FieldList As String, WhereClause As String, Optional 
     
     Set dtOut = New cDataTable
 
-    '§§§ Future feature §§§
+    'Â§Â§Â§ Future feature Â§Â§Â§
     
     '0. Parse all parameters into a parse tree
     '1. Define Output Datetable Structure based on Field List
@@ -1918,7 +1946,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             Err.Raise vbObjectError + m_Errors(8).errNumber, Me.Name, m_Errors(8).errDescrption
          Else
             
-            '§§§ needs major rework to include compression §§§
+            'Â§Â§Â§ needs major rework to include compression Â§Â§Â§
             
             'initialize the cell size array
             For iCnt = 1 To m_NumCols
@@ -1974,7 +2002,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
         'Version without Overflow
         '*****
             
-        '§§§ not sure this works as version with header is the same as version without header... §§§
+        'Â§Â§Â§ not sure this works as version with header is the same as version without header... Â§Â§Â§
         
         'standard version
         If IncludeHeader = True Then
@@ -2019,7 +2047,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
                 
         End If
         
-        '§§§ not sure this works as version with header is the same as version without header... §§§
+        'Â§Â§Â§ not sure this works as version with header is the same as version without header... Â§Â§Â§
         
     End If
     
@@ -2134,12 +2162,12 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                 If Not IsTableColumn(SortOrder(i + 1)) Then
                     If UCase(SortOrder(i + 1)) = "ASC" Then
                         ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                        Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))              '§§§ changed to 2nd dimension
+                        Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))              'Â§Â§Â§ changed to 2nd dimension
                         'm_SortedColumn = iColToSort
                         SetSortedColumn iColToSort
                      ElseIf UCase(SortOrder(i + 1)) = "DESC" Then
                         ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                        Call MergeSortDesc(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))          '§§§ changed to 2nd dimension
+                        Call MergeSortDesc(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))          'Â§Â§Â§ changed to 2nd dimension
                         'm_SortedColumn = iColToSort
                         SetSortedColumn iColToSort
                      Else
@@ -2148,7 +2176,7 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                     End If
                  Else
                     ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  '§§§ changed to 2nd dimension
+                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  'Â§Â§Â§ changed to 2nd dimension
                     'm_SortedColumn = iColToSort
                     SetSortedColumn iColToSort
                End If
@@ -2156,7 +2184,7 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                 'we are looking at the last parameter - only process if it is a numeric pointer to the column to sort
                 If IsTableColumn(SortOrder(i)) Then
                     ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  '§§§ changed to 2nd dimension
+                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  'Â§Â§Â§ changed to 2nd dimension
                     'm_SortedColumn = iColToSort
                     SetSortedColumn iColToSort
                 End If
@@ -2186,8 +2214,8 @@ Private Sub MergeSort(List() As Variant, ColToSort As Long, Scratch() As Variant
     Dim iCols As Long
     
     'Determine the number of Columns of the list
-    Dim iColLower As Long: iColLower = LBound(List)          '§§§ changed to 1st dimension
-    Dim iColUpper As Long: iColUpper = UBound(List)          '§§§ changed to 1st dimension
+    Dim iColLower As Long: iColLower = LBound(List)          'Â§Â§Â§ changed to 1st dimension
+    Dim iColUpper As Long: iColUpper = UBound(List)          'Â§Â§Â§ changed to 1st dimension
     
 
     ' If the list has no more than C_CUT_OFF elements,
@@ -2583,7 +2611,7 @@ Private Function Search(SearchFor As Variant, match As MatchType, Index As Strin
 ' ************************************************
 ' Function to search the list, currently supporting:
 ' full table search, binary search on sorted column, indexed search on uniquely indexed columns
-' §§§ Future usage considering non unique indices and data types §§§
+' Â§Â§Â§ Future usage considering non unique indices and data types Â§Â§Â§
 ' ************************************************
 
     Dim lPointer As Long
@@ -2671,12 +2699,12 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, Index A
     If m_Columns(iCol).Index.IndexType = UniqueIndex Then
         'we have a unique index - let's check if the item exists
         'if the item exists, return it's position in the table
-        '§§§ to be implemented §§§
+        'Â§Â§Â§ to be implemented Â§Â§Â§
         lPointer = m_Columns(iCol).Index.GetNextItem(SearchFor, match, Start)
             
      ElseIf m_Columns(iCol).Index.IndexType = NonUniqueIndex Then
         'we have a non-unique index - let's traverse the index
-        '§§§ to be implemented - for the time being let's use linear search §§§
+        'Â§Â§Â§ to be implemented - for the time being let's use linear search Â§Â§Â§
         lPointer = LinearSearch(SearchFor, match, Index, Start)
         
      Else
@@ -2804,7 +2832,7 @@ Private Sub Transpose()
     
     'mTimer.Reset
     
-    '§§§ Performance Improvment: This might be faster by using CopyMemory at a later stage §§§
+    'Â§Â§Â§ Performance Improvment: This might be faster by using CopyMemory at a later stage Â§Â§Â§
     'copy the data from m_List to m_ListTransposed
     m_ListTransposed = m_List
     'Debug.Print "HP Copying m_List to m_ListTransposed took: " & mTimer.MillisecondsElapsed & " milliseconds..."
@@ -3313,7 +3341,7 @@ Private Function GetVarType(myVar) As String
 ' Written By Shanmuga Sundara Raman for http://vbadud.blogspot.com
 ' ---------------------------------------------------------------
 
-'§§§ kept here for the sake of having all data types in one place, maybe used at a later stage §§§
+'Â§Â§Â§ kept here for the sake of having all data types in one place, maybe used at a later stage Â§Â§Â§
 
     If VarType(myVar) = vbNull Then
         GetVarType = "Null (no valid data) "
@@ -3364,7 +3392,7 @@ Private Sub SplitCSV(Expression As String, ResultSplit() As String, ResultCols A
 ' - (C): VBForums / User: Merri - http://www.vbforums.com/showthread.php?604031-Fast-amp-correctly-reading-CSV-parser-(Comma-separated-values)
 '*************************************************************
 
-    Dim CSV() As Integer, HeaderCSV(0 To 5) As Long, lngCSV As Long
+    Dim CSV() As Integer, HeaderCSV(0 To 5) As LongPtr, lngCSV As LongPtr
     ' general variables that we need
     Dim intColumn As Integer, intQuote As Integer, lngRow As Long, strRow As String
     Dim lngExpLen As Long, lngRowLen As Long
@@ -3389,7 +3417,7 @@ Private Sub SplitCSV(Expression As String, ResultSplit() As String, ResultCols A
         HeaderCSV(4) = Len(Expression)
         ' assign Expression data to the Integer array
         lngCSV = ArrayPtr(CSV)
-        PutMem4 lngCSV, VarPtr(HeaderCSV(0))
+        PutMem4 lngCSV, CLng(VarPtr(HeaderCSV(0)))
         ' find first row delimiter, see if within quote or not
         lngA = InStrB(1, Expression, RowDelimiter, Compare)
         Do Until (lngA And 1) Or (lngA = 0)
@@ -3561,4 +3589,3 @@ Private Sub SplitCSV(Expression As String, ResultSplit() As String, ResultCols A
         SafeArrayRedim Not Not ResultSplit, SafeArrayBound(0)
     End If
 End Sub
-
