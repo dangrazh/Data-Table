@@ -50,8 +50,10 @@ Option Base 1
     Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As LongPtr)
     Private Declare PtrSafe Sub FillMemory Lib "kernel32" Alias "RtlFillMemory" (Destination As Any, ByVal Length As LongPtr, ByVal Fill As Byte)
     Private Declare PtrSafe Sub ZeroMemory Lib "kernel32" Alias "RtlZeroMemory" (Destination As Any, ByVal Length As LongPtr)
-    Private Declare PtrSafe Function ArrayPtr Lib "msvbvm60" Alias "VarPtr" (Arr() As Any) As LongPtr
-    Private Declare PtrSafe Sub PutMem4 Lib "msvbvm60" (ByVal Ptr As LongPtr, ByVal Value As Long)
+    Private Declare PtrSafe Function ArrayPtr Lib "VBE7" Alias "VarPtr" (ByRef Var() As Any) As LongPtr
+    Private Declare PtrSafe Sub PutMem4 Lib "VBE7" (ByVal Ptr As LongPtr, ByVal Value As LongPtr)
+    'Private Declare PtrSafe Function ArrayPtr Lib "msvbvm60" Alias "VarPtr" (Arr() As Any) As LongPtr
+    'Private Declare PtrSafe Sub PutMem4 Lib "msvbvm60" (ByVal Ptr As LongPtr, ByVal Value As LongPtr)
     Private Declare PtrSafe Function SafeArrayRedim Lib "oleaut32" (ByVal saPtr As LongPtr, saBound As Long) As LongPtr
 #Else
     Private Const PTR_LENGTH As Long = 4
@@ -203,6 +205,7 @@ Private m_Bookmark As Long                      ' Bookmark pointing to the curre
 Private m_HasHeaders As Boolean                 ' Indicates if column headers were provided
 Private m_IsDirty As Boolean                    ' Indicates if the array needs cleanup and a refresh of the transposed list
 Private m_IsLocked As Boolean                   ' Indicates if the class is currently being updated
+Private m_IsIndexed As Boolean                  ' Indicates if the class has at least one active index
 Private m_BOF As Boolean                        ' Indicates that the cursor has reached the beginning of the table
 Private m_EOF As Boolean                        ' Indicates that the cursor has reached the end of the table
 Private m_Errors(1 To 10) As ErrorCode          ' List of all error codes
@@ -234,6 +237,7 @@ Private Sub Class_Initialize()
     m_EOF = False
     m_BOF = False
     m_IsLocked = False
+    m_IsIndexed = False
         
     'initialize any default / start values
     m_NumCols = 1
@@ -270,6 +274,8 @@ Private Sub Class_Terminate()
     'empty the list
     ReDim m_List(1, 1)
     ReDim m_ListTransposed(1, 1)
+    
+    
 
 
 End Sub
@@ -279,13 +285,16 @@ Public Property Get Version() As String
 ' Version string of the current class.
 ' Contains a list of (historical) changes to the class within the comments of the procedure.
 ' ************************************************
-   'Version = "Version 1.0.0.0 (2017)"  'Initial release
+   'Version = "Version 1.0.0.0 (2017)"      'Initial release
    'Version = "Version 1.0.1.0 (06/2017)"   'Including bug fixes for garbage collection and output to excel
    'Version = "Version 1.1.0.0 (06/2017)"   'Including features to make class thread save
    'Version = "Version 1.2.0.0 (12/2017)"   'Including new features on columns and 1st version of indexing
    'Version = "Version 1.2.1.0 (01/2018)"   'Including x64 compatibility
-   'Version = "Version 1.2.2.1 (01/2018)"    'Fixed pattern matching and SortUnstable
-   Version = "Version 1.2.2.2 (02/2018)"    'Fixed RecordAdd to handle both arrays and ParamArray
+   'Version = "Version 1.2.2.1 (01/2018)"   'Fixed pattern matching and SortUnstable
+   'Version = "Version 1.2.2.2 (02/2018)"   'Fixed RecordAdd to handle both arrays and ParamArray
+                                            'Implement enabling of object storage
+   'Version = "Version 1.2.3.0 (01/2019)"    'Added maintenance of indices, i.e. completed indexing for unique indices
+   Version = "Version 1.2.3.1 (05/2019)"    'Fixed WriteToCell with additional checks for wrapped output
    
 
 End Property
@@ -593,7 +602,7 @@ Public Property Get Record(Optional Row As Long = -1) As Variant()
 
     Dim iCol As Long
     Dim tmpRec() As Variant
-    Dim position As Long
+    Dim Position As Long
         
         
     If Row = -1 And m_Bookmark = -1 Then
@@ -602,10 +611,10 @@ Public Property Get Record(Optional Row As Long = -1) As Variant()
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
-        position = Row
+        Position = Row
      ElseIf m_Bookmark > -1 Then
         'we have a valid bookmark so let's use this
-        position = m_Bookmark
+        Position = m_Bookmark
      Else
         MsgBox "Unhandled condition in Property Get 'Record'", vbCritical
         Exit Property
@@ -613,7 +622,7 @@ Public Property Get Record(Optional Row As Long = -1) As Variant()
         
         
         
-    If position < 1 Or position > m_NumItems Then
+    If Position < 1 Or Position > m_NumItems Then
         ' Out of bounds. Return Null.
         Record = Null
      Else
@@ -624,7 +633,7 @@ Public Property Get Record(Optional Row As Long = -1) As Variant()
         '        ' Return the record.
         '        tmpRec(iCol) = m_List(iCol, position)
         'Next iCol
-        RecordRead tmpRec, position
+        RecordRead tmpRec, Position
         
         Record = tmpRec
                 
@@ -639,7 +648,7 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
 
     Dim iCol As Long
     Dim tmpRec() As Variant
-    Dim position As Long
+    Dim Position As Long
         
     
     If Row = -1 And m_Bookmark = -1 Then
@@ -648,17 +657,17 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
-        position = Row
+        Position = Row
      ElseIf m_Bookmark > -1 Then
         'we have a valid bookmark so let's use this
-        position = m_Bookmark
+        Position = m_Bookmark
      Else
         MsgBox "Unhandled condition in Property Let 'Record'", vbCritical
         Exit Property
     End If
         
         
-    If position < 1 Or position > m_NumItems Then
+    If Position < 1 Or Position > m_NumItems Then
         ' Out of bounds, raise error
         ' The range 513-65535 is available for user errors.
         ' For class errors, you add vbObjectError to the error number.
@@ -675,7 +684,7 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
             '    ' Set the record values.
             '    m_List(iCol, position) = Record(iCol)
             'Next iCol
-            RecordWrite position, Record, 0
+            RecordWrite Position, Record, 0
         
             'handle thread safety
             ReleaseLock
@@ -717,7 +726,7 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
         ReDim m_Columns(1 To NoOfColumns)
         
         'Name the Fields Field<n> if no field list is provided
-        If ColumnHeaders = "n/a" Or InStr(ColumnHeaders, ",") = 0 Then
+        If ColumnHeaders = "n/a" Or (NoOfColumns < 1 And InStr(ColumnHeaders, ",") = 0) Then
                 For i = 1 To NoOfColumns
                         m_Columns(i).Name = "Field" & i
                         m_Columns(i).Number = i
@@ -741,13 +750,28 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
                     
                     m_NumCols = NoOfColumns
                     m_HasHeaders = True
-                    
                 Else
                     'raise error -> Not the same no of column Names as NoOfColumns specified
                     ' The range 513-65535 is available for user errors.
                     ' For class errors, you add vbObjectError to the error number.
                     Err.Raise vbObjectError + 514, Me.Name, "The list of Header Names does not match the number of columns you specified!"
                 End If
+          ElseIf ColumnHeaders <> "n/a" And NoOfColumns = 1 Then
+            'table with a single named column
+            m_Columns(i).Name = ColumnHeaders
+            m_Columns(i).Number = 1
+            m_Columns(i).IsSorted = False
+            m_Columns(i).IsIndexed = False
+            m_Columns(i).Type = dtVariant
+            
+            m_NumCols = NoOfColumns
+            m_HasHeaders = True
+                      
+          Else
+            'raise error -> Not the same no of column Names as NoOfColumns specified
+            ' The range 513-65535 is available for user errors.
+            ' For class errors, you add vbObjectError to the error number.
+            Err.Raise vbObjectError + 514, Me.Name, "The list of Header Names does not match the number of columns you specified!"
         End If
         
 End Sub
@@ -793,7 +817,7 @@ Public Sub AnalyzeDataTypes()
 End Sub
 
 
-Public Sub AddIndex(ColumnName As String, idxType As IndexType)
+Public Sub IndexAdd(ColumnName As String, idxType As IndexType)
 ' ***********************************************
 ' Create an index on a given column
 ' ***********************************************
@@ -801,7 +825,7 @@ Public Sub AddIndex(ColumnName As String, idxType As IndexType)
     Dim oIdx As New cIndex
     Dim iColIdx As Long
     
-    ReDim aData(1 To m_NumItems)
+    'ReDim aData(1 To m_NumItems)
     
     If m_IsDirty = True Then
         Call CleanUpTable
@@ -812,12 +836,72 @@ Public Sub AddIndex(ColumnName As String, idxType As IndexType)
     oIdx.Create Me, ColumnName
     Set m_Columns(iColIdx).Index = oIdx
     m_Columns(iColIdx).IsIndexed = True
+    m_IsIndexed = True
 
 
 End Sub
 
+Public Sub IndexRemove(ColumnName As String)
+' ***********************************************
+' Remove an index on a given column
+' ***********************************************
 
-'Public Sub RefreshIndices()
+    Dim i As Long
+    Dim iColIdx As Long
+    Dim bIsIndexed As Boolean: bIsIndexed = False
+    
+    iColIdx = GetColumnIndex(ColumnName)
+    
+    'remove the index and the indexed flag
+    Set m_Columns(iColIdx).Index = Nothing
+    m_Columns(iColIdx).IsIndexed = False
+    
+    'check if this was the last indexed column, if yes
+    'remove the indexed flag on the table itself
+    For i = LBound(m_Columns) To UBound(m_Columns)
+        If m_Columns(i).IsIndexed Then
+            bIsIndexed = True
+            Exit For
+        End If
+    Next i
+    
+    If bIsIndexed = False Then
+        m_IsIndexed = False
+    End If
+
+End Sub
+
+Private Sub IndexItemAdd(stValue As String, iColumn As Long, iPosition As Long)
+' ***********************************************
+' Add a specific item to the
+' ***********************************************
+
+    m_Columns(iColumn).Index.ItemAdd stValue, iPosition
+
+End Sub
+
+Private Sub IndexItemRemove(stValue As String, iColumn As Long, iPosition As Long)
+' ***********************************************
+' Add a specific item to the
+' ***********************************************
+
+    m_Columns(iColumn).Index.ItemRemove stValue, iPosition
+
+End Sub
+
+
+Private Sub IndexItemUpdate(stValueOld As String, stValueNew As String, iColumn As Long, iPosition As Long)
+' ***********************************************
+' Update a specific item in the index
+' ***********************************************
+    
+    m_Columns(iColumn).Index.ItemUpdate stValueOld, stValueNew, iPosition
+
+End Sub
+
+
+
+'Public Sub IndicesRefresh()
 ' ***********************************************
 ' Refresh all indices in the table
 ' ***********************************************
@@ -844,6 +928,8 @@ End Sub
 Public Sub TruncateTable(AskForConfirmation As Boolean)
 
     Dim retVal As Integer
+    Dim oIdx As cIndex
+    Dim i As Long
 
     If AskForConfirmation = True Then
         MsgBox "This will delete all data from the table! Do you really want to continue?", vbQuestion + vbYesNoCancel, "Truncating Table"
@@ -859,10 +945,20 @@ Public Sub TruncateTable(AskForConfirmation As Boolean)
     'reset the array size to 1
     m_ArraySize = 1
     
-
+    'reset indices if required
+    If m_IsIndexed Then
+        For i = LBound(m_Columns) To UBound(m_Columns)
+            If m_Columns(i).IsIndexed Then
+                Set m_Columns(i).Index = Nothing
+                Set oIdx = New cIndex
+                Set m_Columns(i).Index = oIdx
+            End If
+        Next i
+    End If
+    
 End Sub
 
-Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Variant
+Private Function ItemGet(ByVal Position As Long, ByVal Index As String) As Variant
 ' ***********************************************
 ' Return an item from the list by position.
 ' ***********************************************
@@ -876,7 +972,7 @@ Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Varia
     LockForUpdate
 
 
-    If position < 1 Or position > m_NumItems Then
+    If Position < 1 Or Position > m_NumItems Then
         ' Out of bounds. Return Null.
         ItemGet = Null
     Else
@@ -889,7 +985,7 @@ Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Varia
          Else
             ' Return the item.
             'ItemGet = m_List(iCol, position)
-            ItemRead vItemTmp, iCol, position
+            ItemRead vItemTmp, iCol, Position
         End If
         
         If m_EnableObjects = True Then
@@ -908,15 +1004,16 @@ Private Function ItemGet(ByVal position As Long, ByVal Index As String) As Varia
         
 End Function
 
-Private Sub ItemSet(ByVal position As Long, ByVal Index As String, Value As Variant)
+Private Sub ItemSet(ByVal Position As Long, ByVal Index As String, Value As Variant)
 ' ***********************************************
 ' Set the value of an item in the list by position.
 ' ***********************************************
 
     Dim iCol As Long
+    Dim vValueOld As Variant
     'Dim bColFound As Boolean: bColFound = False
 
-    If position < 1 Or position > m_NumItems Then
+    If Position < 1 Or Position > m_NumItems Then
         ' Out of bounds, raise error
         ' The range 513-65535 is available for user errors.
         ' For class errors, you add vbObjectError to the error number.
@@ -933,10 +1030,19 @@ Private Sub ItemSet(ByVal position As Long, ByVal Index As String, Value As Vari
             'handle thread safety
             CheckLockStatus
             LockForUpdate
-         
-            ' Set the value of the item
-            'm_List(iCol, position) = value
-            ItemWrite Value, iCol, position
+                     
+            'update item and index if column is indexed
+            If m_Columns(iCol).IsIndexed = True Then
+                'Get the old item value
+                ItemRead vValueOld, iCol, Position
+                'Set the new value of the item
+                ItemWrite Value, iCol, Position
+                'Update the index
+                IndexItemUpdate CStr(vValueOld), CStr(Value), iCol, Position
+             Else
+                ' Set the value of the item
+                ItemWrite Value, iCol, Position
+            End If
             
             'handle thread safety
             ReleaseLock
@@ -1021,8 +1127,9 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
             iColOffset = -1
         End If
  
-        If lNoOfCols = UBound(m_List, 1) Then
-        
+        'If lNoOfCols = UBound(m_List, 1) Then
+        'new version, accepting input ranges with less or equal number of elements, assuming emtry 'trail columns'
+        If lNoOfCols <= UBound(m_List, 1) Then
             'handle thread safety
             CheckLockStatus
             LockForUpdate
@@ -1039,7 +1146,9 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
             'Next iCol
             If m_EnableObjects Then
                 'add the record to the list
-                For iCol = 1 To m_NumCols
+                'For iCol = 1 To m_NumCols
+                'new version, accepting input ranges with less or equal number of elements, assuming emtry 'trail columns'
+                For iCol = 1 To lNoOfCols
                         If IsObject(Record(iCol + iColOffset)) Then
                             Set m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
                          Else
@@ -1048,12 +1157,23 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
                 Next iCol
              Else
                 'add the record to the list
-                For iCol = 1 To m_NumCols
+                'For iCol = 1 To m_NumCols
+                'new version, accepting input ranges with less or equal number of elements, assuming emtry 'trail columns'
+                For iCol = 1 To lNoOfCols
                         m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
                 Next iCol
             End If
-                        
-                        
+            
+            'update index if table is indexed
+            If m_IsIndexed Then
+                For iCol = 1 To lNoOfCols
+                    'update index if column is indexed
+                    If m_Columns(iCol).IsIndexed = True Then
+                        IndexItemAdd CStr(Record(iCol + iColOffset)), iCol, m_NumItems
+                    End If
+                Next iCol
+            End If
+            
             'mark data table as dirty
             m_IsDirty = True
             
@@ -1072,7 +1192,7 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
         
 End Sub
 
-Public Sub RecordRemove(ByVal position As Long)
+Public Sub RecordRemove(ByVal Position As Long)
 ' ***********************************************
 ' Remove an item from the list.
 ' ***********************************************
@@ -1087,7 +1207,7 @@ Public Sub RecordRemove(ByVal position As Long)
     '*** this approach is too slow if the table has a lot of columns ****
     ' set the record to Null
     For iCol = 1 To m_NumCols
-            m_List(iCol, position) = "#DELETED"
+            m_List(iCol, Position) = "#DELETED"
     Next iCol
 
 '    'mark the 1st element of the record as deleted (faster approach)
@@ -1097,12 +1217,12 @@ Public Sub RecordRemove(ByVal position As Long)
     m_GarbageCount = m_GarbageCount + 1
     
     'Update the 1st and the last garbage if required
-    If position < m_FirstGarbage Or m_FirstGarbage = 0 Then
-        m_FirstGarbage = position
+    If Position < m_FirstGarbage Or m_FirstGarbage = 0 Then
+        m_FirstGarbage = Position
     End If
     
-    If position > m_LastGarbage Or m_LastGarbage = 0 Then
-        m_LastGarbage = position
+    If Position > m_LastGarbage Or m_LastGarbage = 0 Then
+        m_LastGarbage = Position
     End If
     
     'Check if garbage has to be collected and do so if yes
@@ -1149,7 +1269,7 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         Dim want_free As Long
         
         
-        Dim mTimer As New CStopWatch
+        Dim mTimer As New cStopWatch
 
         
         'handle thread safety
@@ -1946,8 +2066,6 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             Err.Raise vbObjectError + m_Errors(8).errNumber, Me.Name, m_Errors(8).errDescrption
          Else
             
-            '§§§ needs major rework to include compression §§§
-            
             'initialize the cell size array
             For iCnt = 1 To m_NumCols
                 aCellSize(iCnt) = 0
@@ -1959,6 +2077,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
                     TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
                 Next iColIdx
                 
+                'increment the starting row for the output by 1 to cater for the header line
                 iRowOut = iRowOut + 1
                 
             End If
@@ -1983,6 +2102,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
                         aCellSize(iCnt) = 0
                         aCellContent(iCnt) = ""
                     Next iColIdx
+                    iRowOut = iRowOut + 1
                 End If
                 
                 'append the current row to the output (i.e. construct the output itself)
@@ -2001,54 +2121,55 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
         '*****
         'Version without Overflow
         '*****
-            
-        '§§§ not sure this works as version with header is the same as version without header... §§§
         
         'standard version
         If IncludeHeader = True Then
-            '*****
-            'Output data with header
-            '*****
             
+            'Output the header
             For iColIdx = 1 To m_NumCols
                 TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
             Next iColIdx
             
-            'dump the content cell by cell, row by row
-            For iRowIdx = 1 To m_NumItems
-                For iColIdx = 1 To m_NumCols
-                    stContent = m_ListTransposed(iRowIdx, iColIdx)
-                    If InStr(stContent, vbLf) Or InStr(stContent, vbCr) Then
-                        'add a single quote at the beginning of the content to prevent err 1004 to occur
-                        TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = "'" & m_ListTransposed(iRowIdx, iColIdx)
-                     Else
-                        TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = m_ListTransposed(iRowIdx, iColIdx)
-                    End If
-                Next iColIdx
-            Next iRowIdx
+            'increment the starting row for the output by 1 to cater for the header line
+            iRow = iRow + 1
             
-         Else
-            '*****
-            'Output data without header
-            '*****
-            
-            'dump the content cell by cell, row by row
-            For iRowIdx = 1 To m_NumItems
-                For iColIdx = 1 To m_NumCols
-                    stContent = m_ListTransposed(iRowIdx, iColIdx)
-                    If InStr(stContent, vbLf) Or InStr(stContent, vbCr) Then
-                        'add a single quote at the beginning of the content to prevent err 1004 to occur
-                        TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = "'" & m_ListTransposed(iRowIdx, iColIdx)
-                     Else
-                        TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = m_ListTransposed(iRowIdx, iColIdx)
-                    End If
-                Next iColIdx
-           Next iRowIdx
-                
         End If
-        
-        '§§§ not sure this works as version with header is the same as version without header... §§§
-        
+            
+        'dump the content cell by cell, row by row
+        For iRowIdx = 1 To m_NumItems
+            For iColIdx = 1 To m_NumCols
+                stContent = m_ListTransposed(iRowIdx, iColIdx)
+                If InStr(stContent, vbLf) Or InStr(stContent, vbCr) Or Left$(stContent, 1) = "+" Or Left$(stContent, 1) = "-" Or Left$(stContent, 1) = "=" Then
+                    'add a single quote at the beginning of the content to prevent err 1004 to occur
+                    TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = "'" & m_ListTransposed(iRowIdx, iColIdx)
+                 Else
+                    TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = m_ListTransposed(iRowIdx, iColIdx)
+                End If
+            Next iColIdx
+        Next iRowIdx
+            
+'         Else
+'            '*****
+'            'Output data without header
+'            '*****
+'
+'            'dump the content cell by cell, row by row
+'            For iRowIdx = 1 To m_NumItems
+'                For iColIdx = 1 To m_NumCols
+'                    stContent = m_ListTransposed(iRowIdx, iColIdx)
+'                    If InStr(stContent, vbLf) Or InStr(stContent, vbCr) Or Left$(stContent, 1) = "+" Or Left$(stContent, 1) = "-" Or Left$(stContent, 1) = "=" Then
+'                        'add a single quote at the beginning of the content to prevent err 1004 to occur
+'                        TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = "'" & m_ListTransposed(iRowIdx, iColIdx)
+'                     Else
+'                        TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = m_ListTransposed(iRowIdx, iColIdx)
+'                    End If
+'                Next iColIdx
+'           Next iRowIdx
+'
+'        End If
+'
+'        '§§§ not sure this works as version with header is the same as version without header... §§§
+'
     End If
     
     
@@ -2935,27 +3056,27 @@ End Function
 '# General routines
 '#======================================================================================================================
 
-Private Sub ItemRead(ByRef vItem As Variant, ByVal iCol As Long, ByVal position As Long)
+Private Sub ItemRead(ByRef vItem As Variant, ByVal iCol As Long, ByVal Position As Long)
 ' ***********************************************
 ' Returns a given single value
 ' ***********************************************
     
 
     If m_EnableObjects Then
-        If IsObject(m_List(iCol, position)) Then
-            Set vItem = m_List(iCol, position)
+        If IsObject(m_List(iCol, Position)) Then
+            Set vItem = m_List(iCol, Position)
          Else
-            vItem = m_List(iCol, position)
+            vItem = m_List(iCol, Position)
         End If
      Else
-        vItem = m_List(iCol, position)
+        vItem = m_List(iCol, Position)
     End If
 
 
 End Sub
 
 
-Private Sub ItemWrite(vValue As Variant, ByVal iCol As Long, ByVal position As Long)
+Private Sub ItemWrite(vValue As Variant, ByVal iCol As Long, ByVal Position As Long)
 ' ***********************************************
 ' Writes a given single value to a given position
 ' ***********************************************
@@ -2963,18 +3084,17 @@ Private Sub ItemWrite(vValue As Variant, ByVal iCol As Long, ByVal position As L
 
     If m_EnableObjects Then
         If IsObject(vValue) Then
-            Set m_List(iCol, position) = vValue
+            Set m_List(iCol, Position) = vValue
          Else
-            m_List(iCol, position) = vValue
+            m_List(iCol, Position) = vValue
         End If
      Else
-        m_List(iCol, position) = vValue
+        m_List(iCol, Position) = vValue
     End If
-
 
 End Sub
 
-Private Sub RecordRead(ByRef returnRec() As Variant, ByVal position As Long)
+Private Sub RecordRead(ByRef returnRec() As Variant, ByVal Position As Long)
 ' ***********************************************
 ' Returns a given single row of data
 ' ***********************************************
@@ -2984,23 +3104,23 @@ Private Sub RecordRead(ByRef returnRec() As Variant, ByVal position As Long)
     If m_EnableObjects Then
         For iCol = 1 To m_NumCols
             ' Return the record.
-            If IsObject(m_List(iCol, position)) Then
-                Set returnRec(iCol) = m_List(iCol, position)
+            If IsObject(m_List(iCol, Position)) Then
+                Set returnRec(iCol) = m_List(iCol, Position)
              Else
-                returnRec(iCol) = m_List(iCol, position)
+                returnRec(iCol) = m_List(iCol, Position)
             End If
         Next iCol
      Else
         For iCol = 1 To m_NumCols
             ' Return the record.
-            returnRec(iCol) = m_List(iCol, position)
+            returnRec(iCol) = m_List(iCol, Position)
         Next iCol
     End If
 
 End Sub
 
 
-Private Sub RecordWrite(position As Long, Record() As Variant, iColOffset As Long)
+Private Sub RecordWrite(Position As Long, Record() As Variant, iColOffset As Long)
 ' ***********************************************
 ' Writes a given single row of data to a given position
 ' ***********************************************
@@ -3012,15 +3132,15 @@ Private Sub RecordWrite(position As Long, Record() As Variant, iColOffset As Lon
         'add the record to the list
         For iCol = 1 To m_NumCols
                 If IsObject(Record(iCol + iColOffset)) Then
-                    Set m_List(iCol, position) = Record(iCol + iColOffset)
+                    Set m_List(iCol, Position) = Record(iCol + iColOffset)
                  Else
-                    m_List(iCol, position) = Record(iCol + iColOffset)
+                    m_List(iCol, Position) = Record(iCol + iColOffset)
                 End If
         Next iCol
      Else
         'add the record to the list
         For iCol = 1 To m_NumCols
-                m_List(iCol, position) = Record(iCol + iColOffset)
+                m_List(iCol, Position) = Record(iCol + iColOffset)
         Next iCol
     End If
 
@@ -3417,7 +3537,7 @@ Private Sub SplitCSV(Expression As String, ResultSplit() As String, ResultCols A
         HeaderCSV(4) = Len(Expression)
         ' assign Expression data to the Integer array
         lngCSV = ArrayPtr(CSV)
-        PutMem4 lngCSV, CLng(VarPtr(HeaderCSV(0)))
+        PutMem4 lngCSV, VarPtr(HeaderCSV(0))
         ' find first row delimiter, see if within quote or not
         lngA = InStrB(1, Expression, RowDelimiter, Compare)
         Do Until (lngA And 1) Or (lngA = 0)
