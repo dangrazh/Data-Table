@@ -81,7 +81,7 @@ End Enum
 '#======================================================================================================================
 Private m_IndexUnique As cHashTable             'The actual index itself - if it's a unique index
 'Private m_IndexNonUniuqe As cBPlusTree          'The actual index itself - if it's a non unique index
-Private m_Index As Object                       'The generic representation of the index itself
+'Private m_Index As Object                       'The generic representation of the index itself
 Private m_IndexType As IndexType                'The type of the index
 Private m_Name As String
 
@@ -112,7 +112,7 @@ Private Sub Class_Terminate()
     'Debug.Print "|> Terminating:= " & Me.Name
     Set m_IndexUnique = Nothing
     'Set m_IndexNonUniuqe = Nothing
-    Set m_Index = Nothing
+    'Set m_Index = Nothing
     
 
 End Sub
@@ -183,8 +183,6 @@ Public Property Let IndexType(Value As IndexType)
 End Property
 
 
-
-
 Public Sub Create(ByRef DataTable As cDataTable, Column As String)
 ' ***********************************************
 ' Create the actual index.
@@ -207,19 +205,76 @@ Public Sub Create(ByRef DataTable As cDataTable, Column As String)
              DataTable.RsMoveNext
             Loop
          ElseIf m_IndexType = NonUniqueIndex Then
-            Set m_IndexUnique = New cHashTable
-            'm_IndexUnique.SetSize
-            DataTable.RsMoveFirst
-            Do While Not DataTable.RsEOF
-                stValue = DataTable.Item(Column)
-                    
-             DataTable.RsMoveNext
-            Loop
+            '§§§ to be implemented §§§
          Else
             Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
         End If
 
 End Sub
+
+Public Sub ItemAdd(Value As String, Position As Long)
+' ***********************************************
+' Add a single item in the index.
+' ***********************************************
+
+    If m_IndexType = UniqueIndex Then
+        If m_IndexUnique.Exists(Value) Then
+            Err.Raise vbObjectError + 514, Me.Name, "Value '" & Value & "' is not unique! Failed to update unique index."
+         Else
+            m_IndexUnique.Add Value, Position
+        End If
+     ElseIf m_IndexType = NonUniqueIndex Then
+        '§§§ to be implemented §§§
+     Else
+        Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
+    End If
+
+
+
+End Sub
+
+Public Sub ItemRemove(Value As String, Position As Long)
+' ***********************************************
+' Add a single item in the index.
+' ***********************************************
+
+    If m_IndexType = UniqueIndex Then
+        If m_IndexUnique.Exists(Value) Then
+            m_IndexUnique.Remove Value
+         Else
+            Err.Raise vbObjectError + 514, Me.Name, "Value '" & Value & "' not found in index! Failed to delete from index."
+        End If
+     ElseIf m_IndexType = NonUniqueIndex Then
+        '§§§ to be implemented §§§
+     Else
+        Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
+    End If
+
+
+
+End Sub
+
+Public Sub ItemUpdate(ValueOld As String, ValueNew As String, Position As Long)
+' ***********************************************
+' Update a single item in the index.
+' ***********************************************
+
+    If m_IndexType = UniqueIndex Then
+        If m_IndexUnique.Exists(ValueNew) Then
+            Err.Raise vbObjectError + 514, Me.Name, "Value '" & ValueNew & "' is not unique! Failed to update unique index."
+         Else
+            m_IndexUnique.Remove ValueOld
+            m_IndexUnique.Add ValueNew, Position
+        End If
+     ElseIf m_IndexType = NonUniqueIndex Then
+        '§§§ to be implemented §§§
+     Else
+        Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
+    End If
+
+
+End Sub
+
 
 Public Function GetNextItem(SearchFor As Variant, match As Long, Optional Start As Long = 1) As Long
 ' ***********************************************
