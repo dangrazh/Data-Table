@@ -293,8 +293,11 @@ Public Property Get Version() As String
    'Version = "Version 1.2.2.1 (01/2018)"   'Fixed pattern matching and SortUnstable
    'Version = "Version 1.2.2.2 (02/2018)"   'Fixed RecordAdd to handle both arrays and ParamArray
                                             'Implement enabling of object storage
-   'Version = "Version 1.2.3.0 (01/2019)"    'Added maintenance of indices, i.e. completed indexing for unique indices
-   Version = "Version 1.2.3.1 (05/2019)"    'Fixed WriteToCell with additional checks for wrapped output
+   'Version = "Version 1.2.3.0 (01/2019)"   'Added maintenance of indices, i.e. completed indexing for unique indices
+   'Version = "Version 1.2.3.1 (05/2019)"   'Fixed WriteToCell with additional checks for wrapped output
+   'Version = "Version 1.2.3.2 (01/2020)"   'Fixed m_GarbageCount reset at the end of CollectGarbage procedure
+   'Version = "Version 1.2.3.2 (01/2020)"   'Fixing x64 compatibility in functions using CopyMemory
+   Version = "Version 1.2.3.3 (04/2020)"    'Fixing of x64 compatibility in functions using CopyMemory did not work with "Transpose", hence implemented a quick fix using classic transpose for x64
    
 
 End Property
@@ -1269,7 +1272,7 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         Dim want_free As Long
         
         
-        Dim mTimer As New cStopWatch
+        'Dim mTimer As New cStopWatch
 
         
         'handle thread safety
@@ -1333,12 +1336,12 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         ptrListTemp = getSafeArrayDescrPtr(ListTemp)
         
         'Swap list Transposed and List
-        Call CopyMemory(ByVal ptrListTemp, ByVal ptrList, 4)
-        Call CopyMemory(ByVal ptrList, ByVal ptrListTransposed, 4)
-        Call CopyMemory(ByVal ptrListTransposed, ByVal ptrListTemp, 4)
+        Call CopyMemory(ByVal ptrListTemp, ByVal ptrList, PTR_LENGTH)
+        Call CopyMemory(ByVal ptrList, ByVal ptrListTransposed, PTR_LENGTH)
+        Call CopyMemory(ByVal ptrListTransposed, ByVal ptrListTemp, PTR_LENGTH)
         
         'clean pointer of temp list to avoid crash on extiting the programm
-        Call CopyMemory(ByVal ptrListTemp, 0&, 4&)
+        Call CopyMemory(ByVal ptrListTemp, 0&, PTR_LENGTH)
 
         
         'Performance Improvement: rather than run 'CleanUpTable' to get rid of the deleted 1st row and to transpose the table,
@@ -1662,6 +1665,9 @@ Private Sub CollectGarbage()
     're-initialize the garbage pointers
     m_FirstGarbage = 1
     m_LastGarbage = 1
+    
+    're-initialize the garbage count
+    m_GarbageCount = 0
 
     ' See if we should resize the list.
     If m_NumItems < m_ShrinkWhen Then ResizeList (IncludingWantFreeSpace)
@@ -2929,6 +2935,58 @@ End Function
 '#======================================================================================================================
 
 Private Sub Transpose()
+
+    #If Win64 Then
+        Call TransposeClassic
+    #Else
+        Call TransposeMemCpy
+    #End If
+
+End Sub
+
+
+Private Sub TransposeClassic()
+
+' ***********************************************
+' Transpose the array the classic way
+' ***********************************************
+
+    Dim x As Long
+    Dim y As Long
+    Dim Xupper As Long
+    Dim Yupper As Long
+    Dim tempArray As Variant
+    
+    'Dim mTimer As New cStopWatch
+    
+    'mTimer.Reset
+    
+    'Debug.Print "Entering TransposeClassic..."
+    
+    Xupper = UBound(m_List, 2)
+    Yupper = UBound(m_List, 1)
+    
+    ReDim tempArray(Xupper, Yupper)
+    
+    For x = 1 To Xupper
+        For y = 1 To Yupper
+            tempArray(x, y) = m_List(y, x)
+        Next y
+    Next x
+        
+    'Debug.Print "Transposing the array took: " & mTimer.MillisecondsElapsed & " milliseconds..."
+    
+    'mTimer.Reset
+    m_ListTransposed = tempArray
+    'Debug.Print "Copying the array took: " & mTimer.MillisecondsElapsed & " milliseconds..."
+    
+
+    'Debug.Print "Transpose Classic done..."
+
+End Sub
+
+
+Private Sub TransposeMemCpy()
 ' ***********************************************
 ' Transpose the array using a SafeArray hack
 ' ***********************************************
@@ -2953,7 +3011,7 @@ Private Sub Transpose()
     
     'mTimer.Reset
     
-    'Â§Â§Â§ Performance Improvment: This might be faster by using CopyMemory at a later stage Â§Â§Â§
+    '§§§ Performance Improvment: This might be faster by using CopyMemory at a later stage §§§
     'copy the data from m_List to m_ListTransposed
     m_ListTransposed = m_List
     'Debug.Print "HP Copying m_List to m_ListTransposed took: " & mTimer.MillisecondsElapsed & " milliseconds..."
@@ -3005,10 +3063,10 @@ Private Sub Transpose()
     CopyMemory ByVal lngData, acurNew(1, 1), lngCount * 16
 
     'Now we pretend that the 1st dimension has the no of elements of the 2nd and vice versa
-    CopyMemory ByVal lngSafeArray + 16, lngCountY, 4
-    CopyMemory ByVal lngSafeArray + 20, lngLBoundY, 4
-    CopyMemory ByVal lngSafeArray + 24, lngCountX, 4
-    CopyMemory ByVal lngSafeArray + 28, lngLBoundX, 4
+    CopyMemory ByVal lngSafeArray + 16, lngCountY, PTR_LENGTH
+    CopyMemory ByVal lngSafeArray + 20, lngLBoundY, PTR_LENGTH
+    CopyMemory ByVal lngSafeArray + 24, lngCountX, PTR_LENGTH
+    CopyMemory ByVal lngSafeArray + 28, lngLBoundX, PTR_LENGTH
     
     'Debug.Print "HP Transposing the array took: " & mTimer.MillisecondsElapsed & " milliseconds..."
     
@@ -3431,10 +3489,10 @@ End Function
 
 Private Function getSafeArrayDescrPtr(ByRef varInput As Variant) As LongPtr
 
-    Dim lngSafeArrayDescr As Long
+    Dim lngSafeArrayDescr As LongPtr
     
     '1st pointer only - get the pointer to the Safearray descriptor of input array
-    CopyMemory lngSafeArrayDescr, ByVal (VarPtr(varInput) + 8), 4
+    CopyMemory lngSafeArrayDescr, ByVal (VarPtr(varInput) + 8), PTR_LENGTH
     
     getSafeArrayDescrPtr = lngSafeArrayDescr
 
@@ -3442,14 +3500,14 @@ End Function
 
 Private Function getSafeArrayStructPtr(ByRef varInput As Variant) As LongPtr
 
-    Dim lngSafeArrayDescr As Long
-    Dim lngSafeArrayStruct As Long
+    Dim lngSafeArrayDescr As LongPtr
+    Dim lngSafeArrayStruct As LongPtr
     
     '1st pointer - get the pointer to the Safearray desciptor of input array
-    CopyMemory lngSafeArrayDescr, ByVal (VarPtr(varInput) + 8), 4
+    CopyMemory lngSafeArrayDescr, ByVal (VarPtr(varInput) + 8), PTR_LENGTH
     
     '2nd pointer - get the pointer to the Safearray desciptor of input array
-    Call CopyMemory(lngSafeArrayStruct, ByVal lngSafeArrayDescr, 4&)
+    Call CopyMemory(lngSafeArrayStruct, ByVal lngSafeArrayDescr, PTR_LENGTH)
     
     getSafeArrayStructPtr = lngSafeArrayStruct
 
