@@ -4,6 +4,7 @@ A VB class providing advanced array based data handling. Built with several feat
 ATTENTION: While the basic functionality is fully tested and should work without issues, some of the functionaliy is still under construction and not fully tested!
  
 ## Classes
+You need to include the following three files into your project to use the Data-Table class.
 
 |Class|Description|
 | --- | --- |
@@ -12,3 +13,14 @@ ATTENTION: While the basic functionality is fully tested and should work without
 |cHashTable.cls|This class implements a hashtable, a structure that offers many of the features of a collection or dictionary.|
 
 ## Methods and Attributes
+The Data-Table class exposes the following Attributes and Methods.
+
+##### Attributes
+|Attribute|Description|
+| --- | --- |
+|To be completed||
+
+##### Methods
+|Method|Description|
+| --- | --- |
+|To be completed||
