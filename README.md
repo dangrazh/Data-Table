@@ -1,5 +1,7 @@
 # Data-Table
-A VB class providing advanced array based data handling. Built with several features optimized for MS Excel and 
+A VB class providing advanced array based data handling. Built with several features optimized for MS Excel but working as well with VB6 or any other application supporting VBA.
+
+ATTENTION: While the basic functionality is fully tested and should work without issues, some of the functionaliy is still under construction and not fully tested!
  
 ## Classes
 
