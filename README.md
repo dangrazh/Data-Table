@@ -39,6 +39,29 @@ The Data-Table class exposes the following Attributes and Methods.
 |Get / Let  | Record               | Requires the Row Number as parameter, Returns a Variant Array containing the record specified|
 
 ##### Methods
-|Method|Description|
-| --- | --- |
-|To be completed||
+|Method            | Parameters | Description|
+|------------------|------------|------------|
+|DefineTable       | NoOfColumns As Long, Optional ColumnHeaders As String = "n/a", Optional NoOfRows As Long = 1| Define the structure of the table. This is the frist thing to do after creating the object, unless you load a range or a delimited file.|
+|AnalyzeDataTypes  | --|§§§ Not yet implemented §§§|
+|IndexAdd          | ColumnName As String, idxType As IndexType|Add an index to the specified column|
+|IndexRemove       | ColumnName As String|Add the index from the specified column|
+|IndicesRefresh    | --|§§§ Not yet implemented §§§|
+|RunStats          | --|§§§ Not yet implemented §§§|
+|TruncateTable     | AskForConfirmation As Boolean| Truncate the table and delete all content but not the structure|
+|RecordAddOld      | ByVal aRecord As Variant| Adding a record to the data table with an array containing the data as input
+|RecordAdd         | ParamArray Record() As Variant| Adding a record to the data table passing each column as argument to the method|
+|RecordRemove      | ByVal Position As Long| Delete a single record from the data table|
+|LoadRange         | InputTable As Range, TableHasHeaders As Boolean| Load an MS Excel worksheet range into an empty data table. Note: if you load a range, you do not have to define the data table before.|
+|LoadDelimTextFile | Filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """" | Load a delimited text file into an empty data table. Note: if you load a delimited text file, you do not have to define the data table before.|
+|AppendToTable     | --|§§§ Not yet implemented §§§|
+|RsMoveFirst       | --|Move the RSBookmark to the first record in the data table|
+|RsMoveLast        | --|Move the RSBookmark to the last record in the data table|
+|RsMoveNext        | --|Move the RSBookmark to the next record in the data table| 
+|RsMovePrevious    | --|Move the RSBookmark to the previous record in the data table|
+|RsFindFirst       | Index As Variant, match As MatchType, Criteria As Variant|Move the RSBookmark to frist record matching the criteria - currently only single columns can be used in the search criteria.|
+|RsFindNext        | Index As Variant, match As MatchType, Criteria As Variant|Move the RSBookmark to next record matching the criteria - currently only single columns can be used in the search criteria.|
+|SelectData        | --|§§§ Not yet implemented §§§|
+|DumpToRange       | TargetWorksheet As Worksheet, TargetCell As Range, Optional IncludeHeader As Boolean = True, Optional CompressOnRowOverflow As Boolean = False|Write the full content of the data table to a MS Excel Worksheet range|
+|DumpToFile        | TargetFile As String, Delimiter As String, Optional IncludeHeader As Boolean = True, Optional OutputMode As OutputType = OverwriteIfExists|Write the full content of the data table to a delimited text file|
+|Sort              | ParamArray SortOrder As Variant|Sort the data table with a stable (merge sort) sort mechanism - multiple sort columns as well as sort dirctions can be specified.|
+|SortUnstable      | Index As Variant, Optional Direction As String = "asc"|Sort the data table with a fast but unstable sort mechanism - only one sort column can be specified.
