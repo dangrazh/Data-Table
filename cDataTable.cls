@@ -51,9 +51,11 @@ Option Base 1
     Private Declare PtrSafe Sub FillMemory Lib "kernel32" Alias "RtlFillMemory" (Destination As Any, ByVal Length As LongPtr, ByVal Fill As Byte)
     Private Declare PtrSafe Sub ZeroMemory Lib "kernel32" Alias "RtlZeroMemory" (Destination As Any, ByVal Length As LongPtr)
     Private Declare PtrSafe Function ArrayPtr Lib "VBE7" Alias "VarPtr" (ByRef Var() As Any) As LongPtr
-    Private Declare PtrSafe Sub PutMem4 Lib "VBE7" (ByVal Ptr As LongPtr, ByVal Value As LongPtr)
+    'Private Declare PtrSafe Sub PutMem4 Lib "VBE7" (ByVal Ptr As LongPtr, ByVal Value As LongPtr)
+    Private Declare PtrSafe Sub PutMem4 Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, Optional ByVal Length As Long = 8)
     'Private Declare PtrSafe Function ArrayPtr Lib "msvbvm60" Alias "VarPtr" (Arr() As Any) As LongPtr
     'Private Declare PtrSafe Sub PutMem4 Lib "msvbvm60" (ByVal Ptr As LongPtr, ByVal Value As LongPtr)
+    
     Private Declare PtrSafe Function SafeArrayRedim Lib "oleaut32" (ByVal saPtr As LongPtr, saBound As Long) As LongPtr
 #Else
     Private Const PTR_LENGTH As Long = 4
@@ -208,7 +210,8 @@ Private m_IsLocked As Boolean                   ' Indicates if the class is curr
 Private m_IsIndexed As Boolean                  ' Indicates if the class has at least one active index
 Private m_BOF As Boolean                        ' Indicates that the cursor has reached the beginning of the table
 Private m_EOF As Boolean                        ' Indicates that the cursor has reached the end of the table
-Private m_Errors(1 To 10) As ErrorCode          ' List of all error codes
+Private m_CopyCount As Long                     ' Internal counter to keep track of the number of copies made of this data table
+Private m_Errors(1 To 13) As ErrorCode          ' List of all error codes
 
 '#Region
 '#======================================================================================================================
@@ -244,6 +247,7 @@ Private Sub Class_Initialize()
     m_Bookmark = -1
     m_FirstGarbage = 1
     m_LastGarbage = 1
+    m_CopyCount = 0
     
     'initialize error codes
     m_Errors(1).errNumber = 513:  m_Errors(1).errDescrption = "List is not empty. Range can only be added to empty list!"
@@ -256,6 +260,9 @@ Private Sub Class_Initialize()
     m_Errors(8).errNumber = 520:  m_Errors(8).errDescrption = "No of records in Data Table exeed excel row limit! Use compression mode to output bigger data sets."
     m_Errors(9).errNumber = 901:  m_Errors(9).errDescrption = "Timeout/Deadlock - the data table is locked for update, time limit exeeded!"
     m_Errors(10).errNumber = 521:  m_Errors(10).errDescrption = "Output File already exists!"
+    m_Errors(11).errNumber = 522: m_Errors(11).errDescrption = "Record exeeds no of columns defined for this table. Can't append the data!"
+    m_Errors(12).errNumber = 523:  m_Errors(12).errDescrption = "RSFindNext does not work for columns with a unique index! Please use RSFindFirst instead."
+    m_Errors(13).errNumber = 524:  m_Errors(13).errDescrption = "Column name '[COLUMN_NAME]'count not be found!"
     
 
 End Sub
@@ -297,7 +304,10 @@ Public Property Get Version() As String
    'Version = "Version 1.2.3.1 (05/2019)"   'Fixed WriteToCell with additional checks for wrapped output
    'Version = "Version 1.2.3.2 (01/2020)"   'Fixed m_GarbageCount reset at the end of CollectGarbage procedure
    'Version = "Version 1.2.3.2 (01/2020)"   'Fixing x64 compatibility in functions using CopyMemory
-   Version = "Version 1.2.3.3 (04/2020)"    'Fixing of x64 compatibility in functions using CopyMemory did not work with "Transpose", hence implemented a quick fix using classic transpose for x64
+   'Version = "Version 1.2.3.3 (04/2020)"   'Fixing of x64 compatibility in functions using CopyMemory did not work with "Transpose", hence implemented a quick fix using classic transpose for x64
+   'Version = "Version 1.2.3.4 (08/2020)"   'Fixing of x64 compatibility in functions using CopyMemory did not work with "SplitCSV", hence implemented a completely new CSV parser based on byte array processing (for better speed)
+   Version = "Version 1.2.4.0 (10/2020)"    'Added new features to copy the table structure (but not the data) and to be able to slect a distinct set of data for a given list of columns
+                                            'Added enhanced error handling for RSFindNext in combination with unique indexed columns as well as unknown column names to prevent "slient missbehaviour"
    
 
 End Property
@@ -353,6 +363,27 @@ Public Property Get Headers() As Collection
 
 End Property
 
+Public Property Get HeaderList(Optional IncludeTableName As Boolean = False) As String
+
+    Dim vHead As Variant
+    Dim stHL As String
+
+    For Each vHead In Headers
+        If IncludeTableName = False Then
+            stHL = stHL & vHead & ", "
+         Else
+            stHL = stHL & m_Name & "." & vHead & ", "
+        End If
+    Next
+    
+    stHL = Left$(stHL, Len(stHL) - 2)
+
+    HeaderList = stHL
+
+End Property
+
+
+
 Public Property Get HasHeaders() As Boolean
 ' ***********************************************
 ' Returns the HasHeaders state of the class.
@@ -362,14 +393,14 @@ Public Property Get HasHeaders() As Boolean
 
 End Property
 
-'Public Property Let HasHeaders(bValue As Boolean)
-' ***********************************************
-' Sets the HasHeaders state of the class.
-' ***********************************************
+Friend Property Let HasHeaders(bValue As Boolean)
+'***********************************************
+'Sets the HasHeaders state of the class.
+'***********************************************
 
-'        m_HasHeaders = bValue
+        m_HasHeaders = bValue
 
-'End Property
+End Property
 
 Public Property Get NumItems() As Long
 ' ***********************************************
@@ -452,10 +483,14 @@ Public Property Get TableSummary() As String
 ' ## This is the default property ##
 ' ***********************************************
 
-    TableSummary = "Table Name: " & m_Name & vbCrLf & _
-                    "No of Cols: " & m_NumCols & vbCrLf & _
-                    "No of Recs: " & m_NumItems & vbCrLf & _
-                    "Obj enabled: " & m_EnableObjects
+    TableSummary = "Table Name:          " & m_Name & vbCrLf & _
+                    "No of Columns:      " & m_NumCols & vbCrLf & _
+                    "No of Records:      " & m_NumItems & vbCrLf & _
+                    "Objects enabled:    " & m_EnableObjects & vbCrLf & _
+                    "Gargabe Collection: " & m_CollectGarbage & vbCrLf & _
+                    "Bookmark:           " & m_Bookmark & vbCrLf & _
+                    "Beginning of File:  " & m_BOF & vbCrLf & _
+                    "End of File:        " & m_EOF
 
 End Property
 
@@ -779,6 +814,26 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
         
 End Sub
 
+Public Function CreateEmptyCopy() As cDataTable
+
+    Dim tOut As cDataTable
+    Set tOut = New cDataTable
+
+    'copy the structure of the data table
+    Set tOut = New cDataTable
+    tOut.DefineTable m_NumCols, Me.HeaderList, m_NumItems
+    
+    'copy the important properties
+    m_CopyCount = m_CopyCount + 1
+    With tOut
+        .GarbageCollection = m_CollectGarbage
+        .HasHeaders = m_HasHeaders
+        .Name = m_Name & "_" & m_CopyCount
+        .ObjectStorageEnabled = m_EnableObjects
+    End With
+
+End Function
+
 Public Sub AnalyzeDataTypes()
 ' ***********************************************
 ' Do random spot checks of data contents of each column
@@ -983,8 +1038,9 @@ Private Function ItemGet(ByVal Position As Long, ByVal Index As String) As Varia
         iCol = GetColumnIndex(Index)
         
         If iCol = -1 Then
-            'Column Name not found. Return Null.
-            ItemGet = Null
+            'Column Name not found. raise an error (Return Null did lead to "silent missbehavior")
+            'ItemGet = Null
+            Err.Raise vbObjectError + m_Errors(13).errNumber, Me.Name, Replace(m_Errors(13).errDescrption, "[COLUMN_NAME]", Index)
          Else
             ' Return the item.
             'ItemGet = m_List(iCol, position)
@@ -1374,7 +1430,26 @@ End Sub
 
 #End If
 
-Public Sub LoadDelimTextFile(filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """")
+Public Sub LoadDelimTextFile(filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """") ', Optional Algo As Long = 1)
+' ***********************************************
+' Entry point to load a delimited text file
+' ***********************************************
+
+    #If Win64 Then
+    'If Algo = 1 Then
+        LoadDelimTextFileByteArr filename, FieldDelimiter, RecordDelimiter, TableHasHeaders, TextQualifier
+    
+    #Else
+    ' Else
+        LoadDelimTextFileMemCpy filename, FieldDelimiter, RecordDelimiter, TableHasHeaders, TextQualifier
+    #End If
+    'End If
+
+End Sub
+
+
+
+Private Sub LoadDelimTextFileMemCpy(filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """")
 ' ***********************************************
 ' Add a delimiter File to the empty table
 ' ***********************************************
@@ -1480,6 +1555,132 @@ Public Sub LoadDelimTextFile(filename As String, Optional FieldDelimiter As Stri
         
 
 End Sub
+
+Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """")
+' ***********************************************
+' Add a delimiter File to the empty table
+' ***********************************************
+
+    Dim iRow As Long
+    Dim iCol As Long
+    Dim iColCount As Long
+    Dim lFn As Integer
+    
+    Dim stFileContent As String
+    
+    Dim aRet() As String
+    Dim aRetSingleRow() As String
+    Dim retValRows As Long
+    Dim retValCols As Long
+        
+
+
+    If m_NumItems > 0 Then
+            'raise error -> only allowed with empty list
+            ' The range 513-65535 is available for user errors.
+            ' For class errors, you add vbObjectError to the error number.
+            Err.Raise vbObjectError + 513, Me.Name, "List is not empty. Range can only be added to empty list!"
+     Else
+        
+        'handle thread safety
+        CheckLockStatus
+        LockForUpdate
+        
+        
+        lFn = VBA.FreeFile
+        
+        '1. Open the file and load the data into a string
+        Open filename For Input As #lFn
+            stFileContent = Input(LOF(lFn), #lFn)
+        Close #lFn
+                
+        '2. parse the records
+        ReDim aRet(1 To 1)
+        retValRows = ParseCSV03(stFileContent, aRet, RecordDelimiter, TextQualifier)
+        
+        '3. Define the table
+        
+        'find out how many columns we have by parsing the 1st line of the file
+        ReDim aRetSingleRow(1 To 1)
+        retValCols = ParseCSV03(aRet(1), aRetSingleRow, FieldDelimiter, TextQualifier)
+
+        'Size the list and set attributes
+        If TableHasHeaders = True Then
+            ReDim m_List(1 To retValCols, 1 To retValRows - 1)
+            m_ArraySize = retValRows - 1
+            m_NumItems = retValRows - 1
+         Else
+            ReDim m_List(1 To retValCols, 1 To retValRows)
+            m_ArraySize = retValRows
+            m_NumItems = retValRows
+        End If
+        m_NumCols = retValCols
+
+        'set the columns array
+        iColCount = retValCols
+        ReDim m_Columns(1 To iColCount)
+            
+        If TableHasHeaders = True Then
+            For iCol = 1 To iColCount
+                    m_Columns(iCol).Name = aRetSingleRow(iCol)
+                    m_Columns(iCol).Number = iCol
+                    m_Columns(iCol).IsSorted = False
+                    m_Columns(iCol).IsIndexed = False
+                    m_Columns(iCol).Type = dtString
+            Next iCol
+        Else
+            For iCol = 1 To iColCount
+                    m_Columns(iCol).Name = "Field" & iCol
+                    m_Columns(iCol).Number = iCol
+                    m_Columns(iCol).IsSorted = False
+                    m_Columns(iCol).IsIndexed = False
+                    m_Columns(iCol).Type = dtString
+            Next iCol
+        End If
+        m_HasHeaders = True
+        
+        
+        '5. loop through all records and add them to the table
+        If TableHasHeaders = True Then
+            'start at aRet(2) and parse line by line, then move the items over to m_List
+            For iRow = 2 To UBound(aRet)
+                'parse a single row
+                retValCols = ParseCSV03(aRet(iRow), aRetSingleRow, FieldDelimiter, TextQualifier)
+                If retValCols <= iColCount Then
+                    iColCount = retValCols
+                 Else
+                    'raise an error as we can't append columns on the fly
+                    'For class errors, you add vbObjectError to the error number.
+                    Err.Raise vbObjectError + m_Errors(11).errNumber, Me.Name, m_Errors(11).errDescrption
+                End If
+                For iCol = 1 To iColCount
+                    m_List(iCol, iRow - 1) = aRetSingleRow(iCol)
+                Next iCol
+             'Debug.Print iRow & " done..."
+             DoEvents
+            Next iRow
+            
+         Else
+            For iRow = 1 To UBound(aRet)
+                'parse a single row
+                retValCols = ParseCSV03(aRet(iRow), aRetSingleRow, FieldDelimiter, TextQualifier)
+                For iCol = 1 To iColCount
+                    m_List(iCol, iRow) = aRetSingleRow(iCol)
+                Next iCol
+            Next iRow
+        End If
+
+        'handle thread safety
+        ReleaseLock
+        
+        'mark as dirty
+        m_IsDirty = True
+        
+    End If
+        
+
+End Sub
+
 
 Public Sub AppendToTable(ByRef tSource As cDataTable)
 ' ***********************************************
@@ -1862,6 +2063,20 @@ Public Sub RsFindNext(Index As Variant, match As MatchType, Criteria As Variant)
 ' Moves the bookmark to the next valid record matching the criteria
 ' ***********************************************
 
+    Dim iCol As Long
+
+    iCol = GetColumnIndex(Index)
+    
+    'Check if column is having a unique index - if yes, throw an error
+    '(FindNext on a column with a unique index does not make a lot of sense...)
+    If m_Columns(iCol).IsIndexed = True Then
+        If m_Columns(iCol).Index.IndexType = UniqueIndex Then
+            'raise error
+            Err.Raise vbObjectError + m_Errors(12).errNumber, Me.Name, m_Errors(12).errDescrption
+        End If
+    End If
+
+
     'Find the next matching record
     RsFind Index, match, Criteria
     
@@ -1920,33 +2135,186 @@ End Sub
 '#======================================================================================================================
 
 
-Public Function SelectData(FieldList As String, WhereClause As String, Optional GroupBy As String = "", Optional Having As String = "", Optional SortBy As String = "") As cDataTable
+Public Function SelectData(FieldList As String, WhereClause As String, Optional Distinct As Boolean = False, Optional GroupBy As String = "", Optional Having As String = "", Optional SortBy As String = "") As cDataTable
 ' ***********************************************
 ' Return a new data table object containing recrods
 ' with the specified Field List and matching the WhereClause
 ' ***********************************************
 
-    Dim dtOut As cDataTable
+    Dim tOut As cDataTable
+    Dim tTemp As cDataTable
+    Dim tTempGrp As cDataTable
+    Dim tTempHvg As cDataTable
+    Dim aField() As String
+    Dim aFieldList() As String
+    Dim aFields() As String
+    Dim aTmpRec() As Variant
+    Dim bHasAliases As Boolean
+    Dim bHasAlias As Boolean
+    Dim iIdx As Long
+    Dim stColumns As String
+    Dim lNoOfFields As Long
+    Dim htKeys As cHashTable
     
-    Set dtOut = New cDataTable
+    Set tTemp = New cDataTable
+    Set tOut = New cDataTable
+    Set htKeys = New cHashTable
 
-    'Â§Â§Â§ Future feature Â§Â§Â§
+    '§§§ Future feature §§§
     
-    '0. Parse all parameters into a parse tree
-    '1. Define Output Datetable Structure based on Field List
+    '0. Parse field list
+    '1. Define Output data table structure based on field List
     '2. Evaluate WhereClause
         '2a. Check if sorted / indexed
         '2b. Find relevant records
-    '5. Add each relevent record to new data table
-    '6. create new data table and Apply GroupBy clause
-    '7. evaluate HavingClause -> remove records for which having clause is not true
-    '8. If distinct -> remove duplicates from output
-    '9. Order the table by the OrderBy clause
+    '3. Add each relevent record to new data table
+    '4. create a new data table and Apply GroupBy clause
+    '5. evaluate HavingClause -> remove records for which having clause is not true
+    '6. If distinct -> remove duplicates from output
+    '7. Order the table by the OrderBy clause
+    
+    
+    '0. Parse field list
+    If InStr(LCase$(FieldList), " as ") > 0 Then
+        bHasAliases = True
+    End If
+    aFieldList = Split(FieldList, ",")
+    lNoOfFields = UBound(aFieldList) - LBound(aFieldList) + 1
+    ReDim aFields(1 To lNoOfFields, 1 To 2)
+    ReDim aTmpRec(1 To lNoOfFields)
+    
+    If bHasAliases = True Then
+        'we need to take care of aliases
+        For iIdx = LBound(aFieldList) To UBound(aFieldList)
+            If InStr(LCase$(aFieldList(iIdx)), " as ") > 0 Then
+                aField = Split(aFieldList(iIdx), " as ")
+                aFields(iIdx, 1) = Trim(aField(LBound(aField)))
+                aFields(iIdx, 2) = Trim(aField(UBound(aField)))
+             Else
+                aFields(iIdx, 1) = Trim(aFieldList(iIdx))
+                aFields(iIdx, 2) = Trim(aFieldList(iIdx))
+            End If
+        Next iIdx
+     Else
+        'no aliases, so simply put the field names in both array fields
+        For iIdx = LBound(aFieldList) To UBound(aFieldList)
+            aFields(iIdx, 1) = Trim(aFieldList(iIdx))
+            aFields(iIdx, 2) = Trim(aFieldList(iIdx))
+        Next iIdx
+    End If
+    
+    
+    '1. Define Output data table structure based on field List
+    For iIdx = LBound(aFieldList) To UBound(aFieldList)
+        stColumns = stColumns & aFieldList(iIdx, 2) & ", "
+    Next iIdx
+    
+    stColumns = Left$(stColumns, Len(stColumns) - 2)
+    tOut.DefineTable lNoOfFields, stColumns, m_NumItems
+    
+    
+    '2. Evaluate WhereClause
+        '2a. Check if sorted / indexed
+        '2b. Find relevant records
+    '3. Add each relevent record to new data table
+    Me.RsFindFirst "", Equals, ""
+    Do While Not Me.RsEOF
+        'build the record
+        Erase aTmpRec
+        For iIdx = LBound(aFieldList) To UBound(aFieldList)
+            aTmpRec(iIdx) = Me.Item(aFieldList(iIdx, 1))
+        Next iIdx
+        'add the record to the output data table
+        tOut.RecordAdd aTmpRec
+      Me.RsFindNext "", Equals, ""
+    Loop
+    
+    '4. create a new data table and Apply GroupBy clause
+    '5. evaluate HavingClause -> remove records for which having clause is not true
+    '6. If distinct -> remove duplicates from output
+    If Distinct = True Then
+        Call GetDistinctData(tOut, aFields)
+    End If
+    
+    '7. Order the table by the OrderBy clause
+    tOut.Sort
     
     'Assign the selection result to the function output
-    SelectData = dtOut
+    SelectData = tOut
 
 End Function
+
+Private Sub GetDistinctData(ByRef tData As cDataTable, aKeyFields() As String)
+' ***********************************************
+' Remove duplicate records from the passed data table object
+' to produce a distinct list based on the the specified Field List
+' ***********************************************
+
+    Dim htKeys As cHashTable
+    Dim stKey As String
+    Dim iIdx As Long
+    Set htKeys = New cHashTable
+    
+    With tData
+        .GarbageCollection = False
+        .RsMoveFirst
+        Do While Not .RsEOF
+            stKey = ""
+            For iIdx = LBound(aKeyFields, 1) To UBound(aKeyFields, 1)
+                stKey = stKey & .Item(aKeyFields(iIdx, 2))
+            Next iIdx
+            If Not htKeys.Exists(stKey) Then
+                htKeys.Add stKey, 1
+             Else
+                .RecordRemove .RsBookmark
+            End If
+          .RsMoveNext
+        Loop
+        .GarbageCollection = True
+    End With
+
+    Set htKeys = Nothing
+
+End Sub
+
+Public Function SelectDistinctData(ParamArray Fields() As Variant) As cDataTable
+' ***********************************************
+' Create a copy of the existing data table and return distinct records
+' ***********************************************
+
+    Dim tOut As cDataTable
+    Dim htKeys As cHashTable
+    Dim stKey As String
+    Dim iIdx As Long
+    Set htKeys = New cHashTable
+    
+
+    'create a clone
+    Set tOut = CreateEmptyCopy()
+
+    RsMoveFirst
+    Do While Not m_EOF
+        stKey = ""
+        For iIdx = LBound(Fields) To UBound(Fields)
+            stKey = stKey & Item(Fields(iIdx))
+        Next iIdx
+        If Not htKeys.Exists(stKey) Then
+            'add to hash table
+            htKeys.Add stKey, 1
+
+            'copy data over to new table
+            tOut.RecordAdd Record
+        End If
+      RsMoveNext
+      DoEvents
+    Loop
+
+
+    Set SelectDistinctData = tOut
+    Set htKeys = Nothing
+
+End Function
+
 
 
 '#Region
@@ -2826,12 +3194,17 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, Index A
     If m_Columns(iCol).Index.IndexType = UniqueIndex Then
         'we have a unique index - let's check if the item exists
         'if the item exists, return it's position in the table
-        'Â§Â§Â§ to be implemented Â§Â§Â§
-        lPointer = m_Columns(iCol).Index.GetNextItem(SearchFor, match, Start)
+        If match = Equals Then
+            'searching the hash table only works for exact match
+            lPointer = m_Columns(iCol).Index.GetNextItem(SearchFor, match, Start)
+         Else
+            'anything elase needs a table scan...
+            lPointer = LinearSearch(SearchFor, match, Index, Start)
+        End If
             
      ElseIf m_Columns(iCol).Index.IndexType = NonUniqueIndex Then
         'we have a non-unique index - let's traverse the index
-        'Â§Â§Â§ to be implemented - for the time being let's use linear search Â§Â§Â§
+        '§§§ to be implemented - for the time being let's use linear search §§§
         lPointer = LinearSearch(SearchFor, match, Index, Start)
         
      Else
@@ -2968,12 +3341,23 @@ Private Sub TransposeClassic()
     
     ReDim tempArray(Xupper, Yupper)
     
-    For x = 1 To Xupper
-        For y = 1 To Yupper
-            tempArray(x, y) = m_List(y, x)
-        Next y
-    Next x
-        
+    If m_EnableObjects = True Then
+         For x = 1 To Xupper
+            For y = 1 To Yupper
+                If IsObject(m_List(y, x)) Then
+                    Set tempArray(x, y) = m_List(y, x)
+                 Else
+                    tempArray(x, y) = m_List(y, x)
+                End If
+            Next y
+        Next x
+    Else
+        For x = 1 To Xupper
+            For y = 1 To Yupper
+                tempArray(x, y) = m_List(y, x)
+            Next y
+        Next x
+    End If
     'Debug.Print "Transposing the array took: " & mTimer.MillisecondsElapsed & " milliseconds..."
     
     'mTimer.Reset
@@ -3487,7 +3871,7 @@ End Function
 
 
 
-Private Function getSafeArrayDescrPtr(ByRef varInput As Variant) As LongPtr
+Friend Function getSafeArrayDescrPtr(ByRef varInput As Variant) As LongPtr
 
     Dim lngSafeArrayDescr As LongPtr
     
@@ -3498,7 +3882,7 @@ Private Function getSafeArrayDescrPtr(ByRef varInput As Variant) As LongPtr
 
 End Function
 
-Private Function getSafeArrayStructPtr(ByRef varInput As Variant) As LongPtr
+Friend Function getSafeArrayStructPtr(ByRef varInput As Variant) As LongPtr
 
     Dim lngSafeArrayDescr As LongPtr
     Dim lngSafeArrayStruct As LongPtr
@@ -3767,3 +4151,204 @@ Private Sub SplitCSV(Expression As String, ResultSplit() As String, ResultCols A
         SafeArrayRedim Not Not ResultSplit, SafeArrayBound(0)
     End If
 End Sub
+
+Public Function ParseCSV03(ByRef Expression As String, asValues() As String, Optional stSeparator As String = ";", Optional stQuote As String = """") As Long
+' by Donald, donald@xbeat.net, 20020603, rev 20020701
+' modifications and enhancements by Daniel Grass, 20200830
+
+  Const lAscSpace     As Long = 32   ' Asc(" ")
+  'Const lcAscQuote     As Long = 34   ' Asc("""")
+  'Const lcAscSeparator As Long = 44   ' Asc(","), comma
+  
+  Const lValueNone    As Long = 0 ' states of the parser
+  Const lValuePlain   As Long = 1
+  Const lValueQuoted  As Long = 2
+  
+  Const lNoMatch      As Long = 4
+  Const lMatch        As Long = 6
+  
+  ' BUFFERREDIM is the number of additional elements added to the
+  ' array should the initial count not return the correct count
+  Const BUFFERREDIM   As Long = 64
+  Dim ubValues        As Long
+  Dim cntValues       As Long
+  
+  Dim lAscQuote As Long
+  Dim lPos As Long
+  Dim lAscSeparator As Long
+  Dim lCounter As Long
+  Dim abExpression() As Byte
+  Dim abSeparator() As Byte
+  Dim lSepLen As Long
+  Dim lCharCode As Long
+  Dim posStart As Long
+  Dim posEnd As Long
+  Dim cntTrim As Long
+  Dim lState As Long
+  Dim lMatchState As Long
+  Dim i As Long     'general counter through the byte array
+  Dim iSC As Long   'Separator Check counter through the separator array
+  
+  
+  If LenB(Expression) > 0 Then
+  
+    'initiate the counter
+    cntValues = 1
+  
+    'Translate the inputs
+    lAscQuote = Asc(stQuote)
+    
+    lSepLen = Len(stSeparator)
+    lAscSeparator = Asc(stSeparator)
+      
+    If lSepLen > 1 Then
+        abSeparator = stSeparator ' to byte array
+     ElseIf lSepLen < 1 Then
+        'empty/invlid separator, return the entire expression
+        ReDim asValues(1 To 1)
+        asValues(1) = Expression
+        ParseCSV03 = 1
+        Exit Function
+    End If
+
+    'count the number of cells to return
+    lPos = InStr(Expression, stSeparator)
+    Do While lPos > 0
+      lCounter = lCounter + 1
+      lPos = InStr(lPos + 1, Expression, stSeparator)
+    Loop
+
+
+    abExpression = Expression         ' to byte array
+    ubValues = lCounter + 1
+    ReDim Preserve asValues(1 To ubValues) ' init array to the count of occurences of the separator (Preserve is faster)
+    
+    For i = 0 To UBound(abExpression) Step 2
+      
+      ' 1. unicode char has 16 bits, but 32 bit Longs process faster
+      ' 2. add lower and upper byte: ignoring the upper byte can lead to misinterpretations
+      lCharCode = abExpression(i) Or (&H100 * abExpression(i + 1))
+      
+      Select Case lCharCode
+      
+      Case lAscSpace
+        If lState = lValuePlain Then
+          ' at non-quoted value: trim 2 unicode bytes for each space
+          cntTrim = cntTrim + 2
+        End If
+      
+      Case lAscSeparator
+        'now check if we have a separator that is more than 1 character
+        If lSepLen = 1 Then
+            'process single character separator
+            If lState = lValueNone Then
+              ' ends zero-length value
+              If cntValues > ubValues Then
+                ubValues = ubValues + BUFFERREDIM
+                ReDim Preserve asValues(1 To ubValues)
+              End If
+              asValues(cntValues) = ""
+              cntValues = cntValues + 1
+              posStart = i + 2
+            ElseIf lState = lValuePlain Then
+              ' ends non-quoted value
+              lState = lValueNone
+              posEnd = i - cntTrim
+              If cntValues > ubValues Then
+                ubValues = ubValues + BUFFERREDIM
+                ReDim Preserve asValues(1 To ubValues)
+              End If
+              asValues(cntValues) = MidB$(Expression, posStart + 1, posEnd - posStart)
+              cntValues = cntValues + 1
+              posStart = i + 2
+              cntTrim = 0
+            End If
+         Else
+            'process multiple character separator
+            'start loop at position 2 as we already checked
+            'the first character, i.e. 2 bytes
+            lMatchState = lMatch
+            For iSC = 2 To UBound(abSeparator)
+                If abExpression(i + iSC) <> abSeparator(iSC) Then
+                    'subsequent character does not match, move on with checks
+                    lMatchState = lNoMatch
+                    Exit For
+                End If
+            Next
+            
+            If lMatchState = lMatch Then
+                'the full sequence of characters did match
+                If lState = lValueNone Then
+                  ' ends zero-length value
+                  If cntValues > ubValues Then
+                    ubValues = ubValues + BUFFERREDIM
+                    ReDim Preserve asValues(1 To ubValues)
+                  End If
+                  asValues(cntValues) = ""
+                  cntValues = cntValues + 1
+                  posStart = i + iSC        'need to add the lenght of the separator
+                  i = i + (iSC - 2)         'need to add the lenght of the separator - 2 bytes, as they will be added by the 'next' in the loop
+                ElseIf lState = lValuePlain Then
+                  ' ends non-quoted value
+                  lState = lValueNone
+                  posEnd = i - cntTrim
+                  If cntValues > ubValues Then
+                    ubValues = ubValues + BUFFERREDIM
+                    ReDim Preserve asValues(1 To ubValues)
+                  End If
+                  asValues(cntValues) = MidB$(Expression, posStart + 1, posEnd - posStart)
+                  cntValues = cntValues + 1
+                  posStart = i + iSC        'need to add the lenght of the separator
+                  i = i + (iSC - 2)         'need to add the lenght of the separator - 2 bytes, as they will be added by the 'next' in the loop
+                  cntTrim = 0
+                End If
+                
+                
+            End If
+        End If
+      
+      Case lAscQuote
+        If lState = lValueNone Then
+          ' starts quoted value
+          lState = lValueQuoted
+          ' trims the opening quote
+          posStart = i + 2
+        ElseIf lState = lValueQuoted Then
+          ' ends quoted value, or is a quote within
+          lState = lValuePlain
+          ' trims the closing quote
+          cntTrim = 2
+        End If
+      
+      Case Else
+        If lState = lValueNone Then
+          ' starts non-quoted value
+          lState = lValuePlain
+          posStart = i
+        End If
+        ' reset trimming
+        cntTrim = 0
+      
+      End Select
+    
+    Next
+    
+    ' remainder
+    posEnd = i - cntTrim
+    If cntValues <> ubValues Then
+      ReDim Preserve asValues(1 To cntValues)
+    End If
+    asValues(cntValues) = MidB$(Expression, posStart + 1, posEnd - posStart)
+    ParseCSV03 = cntValues '+ 1
+  
+  Else
+    ' (Expression = "")
+    ' return single-element array containing a zero-length string
+    ReDim asValues(1 To 1)
+    ParseCSV03 = 1
+  
+  End If
+
+End Function
+
+
