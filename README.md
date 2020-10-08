@@ -42,6 +42,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |Method            | Parameters | Description|
 |------------------|------------|------------|
 |DefineTable       | NoOfColumns As Long, Optional ColumnHeaders As String = "n/a", Optional NoOfRows As Long = 1| Define the structure of the table. This is the frist thing to do after creating the object, unless you load a range or a delimited file.|
+|CreateEmptyCopy       | --| Creates an empty copy of the data table including structure but without any data or indices being copied|
 |AnalyzeDataTypes  | --|§§§ Not yet implemented §§§|
 |IndexAdd          | ColumnName As String, idxType As IndexType|Add an index to the specified column|
 |IndexRemove       | ColumnName As String|Add the index from the specified column|
@@ -61,6 +62,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |RsFindFirst       | Index As Variant, match As MatchType, Criteria As Variant|Move the RSBookmark to frist record matching the criteria - currently only single columns can be used in the search criteria.|
 |RsFindNext        | Index As Variant, match As MatchType, Criteria As Variant|Move the RSBookmark to next record matching the criteria - currently only single columns can be used in the search criteria.|
 |SelectData        | --|§§§ Not yet implemented §§§|
+|SelectDistinctData | ParamArray Fields() As Variant|Select a distinct set of data based on the fields passed as input. The result is returned as new data table|
 |DumpToRange       | TargetWorksheet As Worksheet, TargetCell As Range, Optional IncludeHeader As Boolean = True, Optional CompressOnRowOverflow As Boolean = False|Write the full content of the data table to a MS Excel Worksheet range|
 |DumpToFile        | TargetFile As String, Delimiter As String, Optional IncludeHeader As Boolean = True, Optional OutputMode As OutputType = OverwriteIfExists|Write the full content of the data table to a delimited text file|
 |Sort              | ParamArray SortOrder As Variant|Sort the data table with a stable (merge sort) sort mechanism - multiple sort columns as well as sort dirctions can be specified.|
