@@ -111,6 +111,22 @@ Public Enum OutputType
     ErrorIfExists = 3
 End Enum
 
+Public Enum AggregateFunction
+    aggFctMin = 1
+    aggFctMax = 2
+    aggFctSum = 3
+    aggFctAvg = 4
+    accFctCount = 5
+    aggFctMedian = 6
+    aggFctMean = 7
+    aggFctPctl = 8
+End Enum
+
+Public Enum SelectionType
+    selectFields = 1
+    selectRow = 2
+End Enum
+
 Private Enum ResizeType
     IncludingWantFreeSpace = 1
     WithoutEmptyTrailRecords = 2
@@ -575,8 +591,9 @@ Public Property Get Item(Index As Variant, Optional Row As Long = -1) As Variant
 
 
     If Row = -1 And m_Bookmark = -1 Then
-        'raise error as we need either of the information
+        'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
+        ReleaseLock
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
@@ -616,8 +633,9 @@ Public Property Let Item(Index As Variant, Optional Row As Long = -1, Value As V
     
     
     If Row = -1 And m_Bookmark = -1 Then
-        'raise error as we need either of the information
+        'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
+        ReleaseLock
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
@@ -644,8 +662,9 @@ Public Property Get Record(Optional Row As Long = -1) As Variant()
         
         
     If Row = -1 And m_Bookmark = -1 Then
-        'raise error as we need either of the information
+        'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
+        ReleaseLock
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
@@ -690,8 +709,9 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
         
     
     If Row = -1 And m_Bookmark = -1 Then
-        'raise error as we need either of the information
+        'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
+        ReleaseLock
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
@@ -706,9 +726,10 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
         
         
     If Position < 1 Or Position > m_NumItems Then
-        ' Out of bounds, raise error
+        ' Out of bounds, raise error and release the lock
         ' The range 513-65535 is available for user errors.
         ' For class errors, you add vbObjectError to the error number.
+        ReleaseLock
         Err.Raise vbObjectError + m_Errors(4).errNumber, Me.Name, m_Errors(4).errDescrption
      Else
 
@@ -731,9 +752,10 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
             m_IsDirty = True
             
         Else
-            'raise error -> Not the same no of column Names as NoOfColumns specified
+            'release the lock and raise error -> Not the same no of column Names as NoOfColumns specified
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
+            ReleaseLock
             Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
         End If
                 
@@ -789,13 +811,15 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
                     m_NumCols = NoOfColumns
                     m_HasHeaders = True
                 Else
-                    'raise error -> Not the same no of column Names as NoOfColumns specified
+                    ' release the lock and raise error -> Not the same no of column Names as NoOfColumns specified
                     ' The range 513-65535 is available for user errors.
                     ' For class errors, you add vbObjectError to the error number.
+                    ReleaseLock
                     Err.Raise vbObjectError + 514, Me.Name, "The list of Header Names does not match the number of columns you specified!"
                 End If
           ElseIf ColumnHeaders <> "n/a" And NoOfColumns = 1 Then
             'table with a single named column
+            i = 1
             m_Columns(i).Name = ColumnHeaders
             m_Columns(i).Number = 1
             m_Columns(i).IsSorted = False
@@ -806,9 +830,10 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
             m_HasHeaders = True
                       
           Else
-            'raise error -> Not the same no of column Names as NoOfColumns specified
+            ' releaes the lock and raise error -> Not the same no of column Names as NoOfColumns specified
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
+            ReleaseLock
             Err.Raise vbObjectError + 514, Me.Name, "The list of Header Names does not match the number of columns you specified!"
         End If
         
@@ -817,7 +842,6 @@ End Sub
 Public Function CreateEmptyCopy() As cDataTable
 
     Dim tOut As cDataTable
-    Set tOut = New cDataTable
 
     'copy the structure of the data table
     Set tOut = New cDataTable
@@ -831,6 +855,8 @@ Public Function CreateEmptyCopy() As cDataTable
         .Name = m_Name & "_" & m_CopyCount
         .ObjectStorageEnabled = m_EnableObjects
     End With
+    
+    Set CreateEmptyCopy = tOut
 
 End Function
 
@@ -840,7 +866,7 @@ Public Sub AnalyzeDataTypes()
 ' and determine the data type of the column
 ' ***********************************************
 
-    'Â§Â§Â§ Future feature Â§Â§Â§
+    '§§§ Future feature §§§
         
     Dim iCol As Long
     Dim dblPctSampleSize As Double: dblPctSampleSize = 0.1
@@ -857,7 +883,7 @@ Public Sub AnalyzeDataTypes()
         Me.RsBookmark = lStepSize * lCount
         Do While Not Me.RsEOF
             'determine type & keep statistics
-            'Â§Â§Â§ pending implementation Â§Â§Â§
+            '§§§ pending implementation §§§
             
          lCount = lCount + 1
          Me.RsBookmark = lStepSize * lCount
@@ -1038,8 +1064,9 @@ Private Function ItemGet(ByVal Position As Long, ByVal Index As String) As Varia
         iCol = GetColumnIndex(Index)
         
         If iCol = -1 Then
-            'Column Name not found. raise an error (Return Null did lead to "silent missbehavior")
+            'Column Name not found. release the lock and raise an error (Return Null did lead to "silent missbehavior")
             'ItemGet = Null
+            ReleaseLock
             Err.Raise vbObjectError + m_Errors(13).errNumber, Me.Name, Replace(m_Errors(13).errDescrption, "[COLUMN_NAME]", Index)
          Else
             ' Return the item.
@@ -1073,17 +1100,19 @@ Private Sub ItemSet(ByVal Position As Long, ByVal Index As String, Value As Vari
     'Dim bColFound As Boolean: bColFound = False
 
     If Position < 1 Or Position > m_NumItems Then
-        ' Out of bounds, raise error
+        ' Out of bounds, raise error and release the lock
         ' The range 513-65535 is available for user errors.
         ' For class errors, you add vbObjectError to the error number.
+        ReleaseLock
         Err.Raise vbObjectError + m_Errors(4).errNumber, Me.Name, m_Errors(4).errDescrption
     Else
     
         iCol = GetColumnIndex(Index)
         If iCol = -1 Then
-            'Column Name not found, raise error
+            'Column Name not found, raise error and release the lock
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
+            ReleaseLock
             Err.Raise vbObjectError + m_Errors(5).errNumber, Me.Name, m_Errors(5).errDescrption
          Else
             'handle thread safety
@@ -1150,9 +1179,10 @@ Public Sub RecordAddOld(ByVal aRecord As Variant)
 
          Else
             
-            'raise error -> Not the same no of column Names as NoOfColumns specified
+            ' release the lock and raise error -> Not the same no of column Names as NoOfColumns specified
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
+            ReleaseLock
             Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
                 
         End If
@@ -1241,9 +1271,10 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
                      
          Else
          
-            'raise error -> Not the same no of column Names as NoOfColumns specified
+            ' release the lock and raise error -> Not the same no of column Names as NoOfColumns specified
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
+            ReleaseLock
             Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
                 
         End If
@@ -1337,7 +1368,7 @@ Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
         
         
         If m_NumItems > 0 Then
-                'raise error -> only allowed with empty list
+                ' raise error -> only allowed with empty list
                 ' The range 513-65535 is available for user errors.
                 ' For class errors, you add vbObjectError to the error number.
                 Err.Raise vbObjectError + 513, Me.Name, "List is not empty. Range can only be added to empty list!"
@@ -2135,7 +2166,7 @@ End Sub
 '#======================================================================================================================
 
 
-Public Function SelectData(FieldList As String, WhereClause As String, Optional Distinct As Boolean = False, Optional GroupBy As String = "", Optional Having As String = "", Optional SortBy As String = "") As cDataTable
+Private Function SelectData(FieldList As String, WhereClause As String, Optional Distinct As Boolean = False, Optional GroupBy As String = "", Optional Having As String = "", Optional SortBy As String = "") As cDataTable
 ' ***********************************************
 ' Return a new data table object containing recrods
 ' with the specified Field List and matching the WhereClause
@@ -2277,12 +2308,13 @@ Private Sub GetDistinctData(ByRef tData As cDataTable, aKeyFields() As String)
 
 End Sub
 
-Public Function SelectDistinctData(ParamArray Fields() As Variant) As cDataTable
+Public Function SelectDistinctData(tySelection As SelectionType, ParamArray Fields() As Variant) As cDataTable
 ' ***********************************************
 ' Create a copy of the existing data table and return distinct records
 ' ***********************************************
 
     Dim tOut As cDataTable
+    Dim tOutFields As cDataTable
     Dim htKeys As cHashTable
     Dim stKey As String
     Dim iIdx As Long
@@ -2298,19 +2330,59 @@ Public Function SelectDistinctData(ParamArray Fields() As Variant) As cDataTable
         For iIdx = LBound(Fields) To UBound(Fields)
             stKey = stKey & Item(Fields(iIdx))
         Next iIdx
-        If Not htKeys.Exists(stKey) Then
-            'add to hash table
-            htKeys.Add stKey, 1
-
-            'copy data over to new table
-            tOut.RecordAdd Record
+        If Len(stKey) > 0 Then
+            'only process items that have a valid key
+            If Not htKeys.Exists(stKey) Then
+                'add to hash table
+                htKeys.Add stKey, 1
+    
+                'copy data over to new table
+                tOut.RecordAdd Record
+            End If
         End If
       RsMoveNext
       DoEvents
     Loop
 
-
-    Set SelectDistinctData = tOut
+    If tySelection = selectRow Then
+        Set SelectDistinctData = tOut
+     ElseIf tySelection = selectFields Then
+        'to be built...
+        Dim iCols As Long
+        Dim iCol As Long
+        Dim stHeader As String
+        Dim aHeader() As String
+        Dim iOffset As Long: iOffset = 0
+        
+        stHeader = ""
+        iCols = (UBound(Fields) - LBound(Fields)) + 1
+        If LBound(Fields) = 0 Then iOffset = 1
+        ReDim aHeader(1 To iCols)
+        For iIdx = LBound(Fields) To UBound(Fields)
+            stHeader = stHeader & Fields(iIdx) & ", "
+            aHeader(iIdx + iOffset) = Fields(iIdx)
+        Next iIdx
+        stHeader = Left(stHeader, Len(stHeader) - 2)
+        
+        Set tOutFields = New cDataTable
+        
+        tOutFields.DefineTable iCols, stHeader, tOut.NumItems
+        
+        tOut.RsMoveFirst
+        Do While Not tOut.RsEOF
+            tOutFields.RecordAdd ""
+            For iCol = 1 To tOutFields.NumCols
+                tOutFields.Item(iCol, tOutFields.NumItems) = tOut.Item(aHeader(iCol))
+            Next iCol
+          tOut.RsMoveNext
+          DoEvents
+        Loop
+        
+        Set SelectDistinctData = tOutFields
+        
+     Else
+        Set SelectDistinctData = tOut
+    End If
     Set htKeys = Nothing
 
 End Function
@@ -2331,9 +2403,9 @@ Public Sub DumpToRange(TargetWorksheet As Worksheet, TargetCell As Range, Option
 On Error GoTo err_DumpToRange
 
 
-    Dim iRow As Integer: iRow = TargetCell.Row
-    Dim iCol As Integer: iCol = TargetCell.Column
-    Dim iColIdx As Integer
+    Dim iRow As Long: iRow = TargetCell.Row
+    Dim iCol As Long: iCol = TargetCell.Column
+    Dim iColIdx As Long
     
     If m_IsDirty = True Then
         Call CleanUpTable
@@ -2553,7 +2625,7 @@ End Sub
 #End If
 
 
-Public Sub DumpToFile(TargetFile As String, Delimiter As String, Optional IncludeHeader As Boolean = True, Optional OutputMode As OutputType = OverwriteIfExists)
+Public Sub DumpToFile(TargetFile As String, Delimiter As String, Optional TextQualifyer As String = vbNullString, Optional IncludeHeader As Boolean = True, Optional OutputMode As OutputType = OverwriteIfExists)
 ' ***********************************************
 ' Output the array to a text file applying any
 ' given delimiter
@@ -2585,6 +2657,7 @@ Public Sub DumpToFile(TargetFile As String, Delimiter As String, Optional Includ
         Open TargetFile For Output As #fn
     End If
         
+    If IncludeHeader = True Then
         'Output the header if required
         stRecord = ""
         For Each stHeader In Me.Headers
@@ -2595,21 +2668,30 @@ Public Sub DumpToFile(TargetFile As String, Delimiter As String, Optional Includ
             End If
         Next
         Print #fn, stRecord
+    End If
         
-        'output the records
-        stRecord = ""
-        For i = 1 To UBound(m_ListTransposed)
-                For ii = 1 To UBound(m_ListTransposed, 2)
-                        'construct the record ...
-                        If LenB(stRecord) = 0 Then
-                                stRecord = m_ListTransposed(i, ii)
+    'output the records
+    stRecord = ""
+    For i = 1 To UBound(m_ListTransposed)
+            For ii = 1 To UBound(m_ListTransposed, 2)
+                    'construct the record ...
+                    If LenB(stRecord) = 0 Then
+                       If VarType(m_ListTransposed(i, ii)) = vbString Then
+                            stRecord = TextQualifyer & m_ListTransposed(i, ii) & TextQualifyer
                          Else
-                                stRecord = stRecord & Delimiter & m_ListTransposed(i, ii)
+                            stRecord = m_ListTransposed(i, ii)
                         End If
-                Next ii
-          Print #fn, stRecord
-          stRecord = ""
-        Next i
+                     Else
+                        If VarType(m_ListTransposed(i, ii)) = vbString Then
+                            stRecord = stRecord & Delimiter & TextQualifyer & m_ListTransposed(i, ii) & TextQualifyer
+                         Else
+                            stRecord = stRecord & Delimiter & m_ListTransposed(i, ii)
+                        End If
+                    End If
+            Next ii
+      Print #fn, stRecord
+      stRecord = ""
+    Next i
 
         Close #fn
         
