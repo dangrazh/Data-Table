@@ -158,7 +158,7 @@ Private Type DataColumn
     Type As ColumnType
     IsSorted As Boolean
     IsIndexed As Boolean
-    Index As cIndex
+    index As cIndex
 End Type
 
 
@@ -322,8 +322,11 @@ Public Property Get Version() As String
    'Version = "Version 1.2.3.2 (01/2020)"   'Fixing x64 compatibility in functions using CopyMemory
    'Version = "Version 1.2.3.3 (04/2020)"   'Fixing of x64 compatibility in functions using CopyMemory did not work with "Transpose", hence implemented a quick fix using classic transpose for x64
    'Version = "Version 1.2.3.4 (08/2020)"   'Fixing of x64 compatibility in functions using CopyMemory did not work with "SplitCSV", hence implemented a completely new CSV parser based on byte array processing (for better speed)
-   Version = "Version 1.2.4.0 (10/2020)"    'Added new features to copy the table structure (but not the data) and to be able to slect a distinct set of data for a given list of columns
+   'Version = "Version 1.2.4.0 (10/2020)"   'Added new features to copy the table structure (but not the data) and to be able to slect a distinct set of data for a given list of columns
                                             'Added enhanced error handling for RSFindNext in combination with unique indexed columns as well as unknown column names to prevent "slient missbehaviour"
+   'Version = "Version 1.2.5.0 (07/2021)"   'Added new properties to check if column exists and to set a column name
+   Version = "Version 1.2.5.1 (07/2021)"    'Bug fix in the ParseCSV003 procedure to poperly process quoted strings
+
    
 
 End Property
@@ -574,17 +577,37 @@ Public Property Let RsBookmark(Value As Long)
 End Property
 
 
-Public Property Get ItemName(Index As Variant) As String
+Public Property Get ItemName(index As Long) As String
 ' ***********************************************
 ' Return the name of the Item (Column Header)
 ' ***********************************************
 
-    ItemName = GetColumnName(Index)
+    ItemName = GetColumnName(index)
 
 End Property
 
 
-Public Property Get Item(Index As Variant, Optional Row As Long = -1) As Variant
+Public Property Let ItemName(index As Long, Value As String)
+' ***********************************************
+' Set the name of the Item (Column Header)
+' ***********************************************
+
+    SetColumnName index, Value
+    
+End Property
+
+
+Public Property Get ItemExists(index As Variant) As Boolean
+' ***********************************************
+' Check if an Item (Column Header) exists
+' ***********************************************
+
+    ItemExists = IsTableColumn(index)
+
+End Property
+
+
+Public Property Get Item(index As Variant, Optional Row As Long = -1) As Variant
 ' ***********************************************
 ' Return a given item at index / position
 ' ***********************************************
@@ -598,24 +621,24 @@ Public Property Get Item(Index As Variant, Optional Row As Long = -1) As Variant
      ElseIf Row > -1 Then
         'user provided a position, use this one
         If m_EnableObjects = True Then
-            If IsObject(ItemGet(Row, CStr(Index))) Then
-                Set Item = ItemGet(Row, CStr(Index))
+            If IsObject(ItemGet(Row, CStr(index))) Then
+                Set Item = ItemGet(Row, CStr(index))
              Else
-                Item = ItemGet(Row, CStr(Index))
+                Item = ItemGet(Row, CStr(index))
             End If
          Else
-            Item = ItemGet(Row, CStr(Index))
+            Item = ItemGet(Row, CStr(index))
         End If
      ElseIf m_Bookmark > -1 Then
         'we have a valid bookmark so let's use this
         If m_EnableObjects = True Then
-            If IsObject(ItemGet(m_Bookmark, CStr(Index))) Then
-                Set Item = ItemGet(m_Bookmark, CStr(Index))
+            If IsObject(ItemGet(m_Bookmark, CStr(index))) Then
+                Set Item = ItemGet(m_Bookmark, CStr(index))
              Else
-                Item = ItemGet(m_Bookmark, CStr(Index))
+                Item = ItemGet(m_Bookmark, CStr(index))
             End If
          Else
-            Item = ItemGet(m_Bookmark, CStr(Index))
+            Item = ItemGet(m_Bookmark, CStr(index))
         End If
      Else
         MsgBox "Unhandled condition in Property Get 'Item'", vbCritical
@@ -626,7 +649,7 @@ Public Property Get Item(Index As Variant, Optional Row As Long = -1) As Variant
 End Property
 
 
-Public Property Let Item(Index As Variant, Optional Row As Long = -1, Value As Variant)
+Public Property Let Item(index As Variant, Optional Row As Long = -1, Value As Variant)
 ' ***********************************************
 ' Set the value of a given item at position / index
 ' ***********************************************
@@ -639,10 +662,10 @@ Public Property Let Item(Index As Variant, Optional Row As Long = -1, Value As V
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
-            Call ItemSet(Row, CStr(Index), Value)
+            Call ItemSet(Row, CStr(index), Value)
      ElseIf m_Bookmark > -1 Then
         'we have a valid bookmark so let's use this
-        Call ItemSet(m_Bookmark, CStr(Index), Value)
+        Call ItemSet(m_Bookmark, CStr(index), Value)
      Else
         MsgBox "Unhandled condition in Property Let 'Item'", vbCritical
         Exit Property
@@ -918,7 +941,7 @@ Public Sub IndexAdd(ColumnName As String, idxType As IndexType)
     iColIdx = GetColumnIndex(ColumnName)
     oIdx.IndexType = idxType
     oIdx.Create Me, ColumnName
-    Set m_Columns(iColIdx).Index = oIdx
+    Set m_Columns(iColIdx).index = oIdx
     m_Columns(iColIdx).IsIndexed = True
     m_IsIndexed = True
 
@@ -937,7 +960,7 @@ Public Sub IndexRemove(ColumnName As String)
     iColIdx = GetColumnIndex(ColumnName)
     
     'remove the index and the indexed flag
-    Set m_Columns(iColIdx).Index = Nothing
+    Set m_Columns(iColIdx).index = Nothing
     m_Columns(iColIdx).IsIndexed = False
     
     'check if this was the last indexed column, if yes
@@ -960,7 +983,7 @@ Private Sub IndexItemAdd(stValue As String, iColumn As Long, iPosition As Long)
 ' Add a specific item to the
 ' ***********************************************
 
-    m_Columns(iColumn).Index.ItemAdd stValue, iPosition
+    m_Columns(iColumn).index.ItemAdd stValue, iPosition
 
 End Sub
 
@@ -969,7 +992,7 @@ Private Sub IndexItemRemove(stValue As String, iColumn As Long, iPosition As Lon
 ' Add a specific item to the
 ' ***********************************************
 
-    m_Columns(iColumn).Index.ItemRemove stValue, iPosition
+    m_Columns(iColumn).index.ItemRemove stValue, iPosition
 
 End Sub
 
@@ -979,7 +1002,7 @@ Private Sub IndexItemUpdate(stValueOld As String, stValueNew As String, iColumn 
 ' Update a specific item in the index
 ' ***********************************************
     
-    m_Columns(iColumn).Index.ItemUpdate stValueOld, stValueNew, iPosition
+    m_Columns(iColumn).index.ItemUpdate stValueOld, stValueNew, iPosition
 
 End Sub
 
@@ -1033,16 +1056,16 @@ Public Sub TruncateTable(AskForConfirmation As Boolean)
     If m_IsIndexed Then
         For i = LBound(m_Columns) To UBound(m_Columns)
             If m_Columns(i).IsIndexed Then
-                Set m_Columns(i).Index = Nothing
+                Set m_Columns(i).index = Nothing
                 Set oIdx = New cIndex
-                Set m_Columns(i).Index = oIdx
+                Set m_Columns(i).index = oIdx
             End If
         Next i
     End If
     
 End Sub
 
-Private Function ItemGet(ByVal Position As Long, ByVal Index As String) As Variant
+Private Function ItemGet(ByVal Position As Long, ByVal index As String) As Variant
 ' ***********************************************
 ' Return an item from the list by position.
 ' ***********************************************
@@ -1061,13 +1084,13 @@ Private Function ItemGet(ByVal Position As Long, ByVal Index As String) As Varia
         ItemGet = Null
     Else
     
-        iCol = GetColumnIndex(Index)
+        iCol = GetColumnIndex(index)
         
         If iCol = -1 Then
             'Column Name not found. release the lock and raise an error (Return Null did lead to "silent missbehavior")
             'ItemGet = Null
             ReleaseLock
-            Err.Raise vbObjectError + m_Errors(13).errNumber, Me.Name, Replace(m_Errors(13).errDescrption, "[COLUMN_NAME]", Index)
+            Err.Raise vbObjectError + m_Errors(13).errNumber, Me.Name, Replace(m_Errors(13).errDescrption, "[COLUMN_NAME]", index)
          Else
             ' Return the item.
             'ItemGet = m_List(iCol, position)
@@ -1090,7 +1113,7 @@ Private Function ItemGet(ByVal Position As Long, ByVal Index As String) As Varia
         
 End Function
 
-Private Sub ItemSet(ByVal Position As Long, ByVal Index As String, Value As Variant)
+Private Sub ItemSet(ByVal Position As Long, ByVal index As String, Value As Variant)
 ' ***********************************************
 ' Set the value of an item in the list by position.
 ' ***********************************************
@@ -1107,7 +1130,7 @@ Private Sub ItemSet(ByVal Position As Long, ByVal Index As String, Value As Vari
         Err.Raise vbObjectError + m_Errors(4).errNumber, Me.Name, m_Errors(4).errDescrption
     Else
     
-        iCol = GetColumnIndex(Index)
+        iCol = GetColumnIndex(index)
         If iCol = -1 Then
             'Column Name not found, raise error and release the lock
             ' The range 513-65535 is available for user errors.
@@ -1335,7 +1358,7 @@ End Sub
 
 #If C_CON_OFFICE_APP = "XLS" Then
 
-Public Sub LoadRange(InputTable As Range, TableHasHeaders As Boolean)
+Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
 ' ***********************************************
 ' Add a cell range to the empty table
 ' ***********************************************
@@ -1469,7 +1492,6 @@ Public Sub LoadDelimTextFile(filename As String, Optional FieldDelimiter As Stri
     #If Win64 Then
     'If Algo = 1 Then
         LoadDelimTextFileByteArr filename, FieldDelimiter, RecordDelimiter, TableHasHeaders, TextQualifier
-    
     #Else
     ' Else
         LoadDelimTextFileMemCpy filename, FieldDelimiter, RecordDelimiter, TableHasHeaders, TextQualifier
@@ -1627,7 +1649,7 @@ Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter
                 
         '2. parse the records
         ReDim aRet(1 To 1)
-        retValRows = ParseCSV03(stFileContent, aRet, RecordDelimiter, TextQualifier)
+        retValRows = ParseCSV03(stFileContent, aRet, RecordDelimiter, TextQualifier, True)
         
         '3. Define the table
         
@@ -2072,7 +2094,7 @@ Public Sub RsMovePrevious()
     
 End Sub
 
-Public Sub RsFindFirst(Index As Variant, match As MatchType, Criteria As Variant)
+Public Sub RsFindFirst(index As Variant, match As MatchType, Criteria As Variant)
 ' ***********************************************
 ' Moves the bookmark to the first valid record matching the criteria
 ' ***********************************************
@@ -2085,23 +2107,23 @@ Public Sub RsFindFirst(Index As Variant, match As MatchType, Criteria As Variant
     m_EOF = False
     
     'Find the next matching record
-    RsFind Index, match, Criteria
+    RsFind index, match, Criteria
 
 End Sub
 
-Public Sub RsFindNext(Index As Variant, match As MatchType, Criteria As Variant)
+Public Sub RsFindNext(index As Variant, match As MatchType, Criteria As Variant)
 ' ***********************************************
 ' Moves the bookmark to the next valid record matching the criteria
 ' ***********************************************
 
     Dim iCol As Long
 
-    iCol = GetColumnIndex(Index)
+    iCol = GetColumnIndex(index)
     
     'Check if column is having a unique index - if yes, throw an error
     '(FindNext on a column with a unique index does not make a lot of sense...)
     If m_Columns(iCol).IsIndexed = True Then
-        If m_Columns(iCol).Index.IndexType = UniqueIndex Then
+        If m_Columns(iCol).index.IndexType = UniqueIndex Then
             'raise error
             Err.Raise vbObjectError + m_Errors(12).errNumber, Me.Name, m_Errors(12).errDescrption
         End If
@@ -2109,13 +2131,13 @@ Public Sub RsFindNext(Index As Variant, match As MatchType, Criteria As Variant)
 
 
     'Find the next matching record
-    RsFind Index, match, Criteria
+    RsFind index, match, Criteria
     
 
 End Sub
 
 
-Private Sub RsFind(Index As Variant, match As MatchType, Criteria As Variant)
+Private Sub RsFind(index As Variant, match As MatchType, Criteria As Variant)
 ' ***********************************************
 ' Moves the bookmark to the next valid record matching the criteria
 ' ***********************************************
@@ -2138,7 +2160,7 @@ Private Sub RsFind(Index As Variant, match As MatchType, Criteria As Variant)
     End If
     
     'Find the next record matching the criteria and set cursor to this record
-    If Search(Criteria, match, CStr(Index), lPointer) = False Then
+    If Search(Criteria, match, CStr(index), lPointer) = False Then
         'item not found
         m_EOF = True
     End If
@@ -3031,7 +3053,7 @@ Private Sub InsertionSortDesc(List() As Variant, ColToSort As Long, min As Long,
     
 End Sub
 
-Public Sub SortUnstable(Index As Variant, Optional Direction As String = "asc")
+Public Sub SortUnstable(index As Variant, Optional Direction As String = "asc")
 ' ***********************************************
 ' Pulic call of QuickSort-Algorithm
 ' ***********************************************
@@ -3046,8 +3068,8 @@ Public Sub SortUnstable(Index As Variant, Optional Direction As String = "asc")
         ResizeList (WithoutEmptyTrailRecords)
     End If
     
-    If IsTableColumn(Index) Then
-        iColToSort = GetColumnIndex(Index)
+    If IsTableColumn(index) Then
+        iColToSort = GetColumnIndex(index)
         If UCase(Direction) = "ASC" Then
             Call QuickSort(m_List(), iColToSort, LBound(m_List, 2), UBound(m_List, 2))
          ElseIf UCase(Direction) = "DESC" Then
@@ -3059,7 +3081,7 @@ Public Sub SortUnstable(Index As Variant, Optional Direction As String = "asc")
         'Mark table as dirty, as we have changed the order of the items
         m_IsDirty = True
      Else
-        MsgBox "Sort Column '" & Index & "' does not exist in table '" & Me.Name & "'"
+        MsgBox "Sort Column '" & index & "' does not exist in table '" & Me.Name & "'"
         Exit Sub
     End If
     
@@ -3184,7 +3206,7 @@ End Sub
 '# Searching
 '#======================================================================================================================
 
-Private Function Search(SearchFor As Variant, match As MatchType, Index As String, Optional Start As Long = 1) As Boolean
+Private Function Search(SearchFor As Variant, match As MatchType, index As String, Optional Start As Long = 1) As Boolean
 ' ************************************************
 ' Function to search the list, currently supporting:
 ' full table search, binary search on sorted column, indexed search on uniquely indexed columns
@@ -3196,12 +3218,12 @@ Private Function Search(SearchFor As Variant, match As MatchType, Index As Strin
     Dim bFirstItem As Boolean: bFirstItem = False
     Dim lPointer2 As Long
     
-    iCol = GetColumnIndex(Index)
+    iCol = GetColumnIndex(index)
     
     'Check if column is indexed
     If m_Columns(iCol).IsIndexed = True Then
         'Column is index, go for the index
-        lPointer = IndexedSearch(SearchFor, match, Index, Start)
+        lPointer = IndexedSearch(SearchFor, match, index, Start)
      Else
         'Check if column is sorted
         If m_Columns(iCol).IsSorted = True Then
@@ -3222,7 +3244,7 @@ Private Function Search(SearchFor As Variant, match As MatchType, Index As Strin
                 End If
              Else
                 'this is the 1st search of this value in this column, use binary search to find a matching item
-                lPointer = BinarySearch(SearchFor, Index)
+                lPointer = BinarySearch(SearchFor, index)
                                 
                 If lPointer = 0 Then
                     'No item found, let's exit
@@ -3246,7 +3268,7 @@ Private Function Search(SearchFor As Variant, match As MatchType, Index As Strin
             End If
          Else
             'Column is neither indexed nor sorted - use linear search
-            lPointer = LinearSearch(SearchFor, match, Index, Start)
+            lPointer = LinearSearch(SearchFor, match, index, Start)
         End If
     End If
 
@@ -3260,7 +3282,7 @@ Private Function Search(SearchFor As Variant, match As MatchType, Index As Strin
 
 End Function
 
-Private Function IndexedSearch(SearchFor As Variant, match As MatchType, Index As String, Optional Start As Long = 1) As Long
+Private Function IndexedSearch(SearchFor As Variant, match As MatchType, index As String, Optional Start As Long = 1) As Long
 ' ************************************************
 ' Locate the item using the index on the column
 ' This function returns the pointer to the recrod, not the record itself.
@@ -3270,28 +3292,28 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, Index A
     Dim iCol As Long
     Dim lPointer As Long
 
-    iCol = GetColumnIndex(Index)
+    iCol = GetColumnIndex(index)
     
     
-    If m_Columns(iCol).Index.IndexType = UniqueIndex Then
+    If m_Columns(iCol).index.IndexType = UniqueIndex Then
         'we have a unique index - let's check if the item exists
         'if the item exists, return it's position in the table
         If match = Equals Then
             'searching the hash table only works for exact match
-            lPointer = m_Columns(iCol).Index.GetNextItem(SearchFor, match, Start)
+            lPointer = m_Columns(iCol).index.GetNextItem(SearchFor, match, Start)
          Else
             'anything elase needs a table scan...
-            lPointer = LinearSearch(SearchFor, match, Index, Start)
+            lPointer = LinearSearch(SearchFor, match, index, Start)
         End If
             
-     ElseIf m_Columns(iCol).Index.IndexType = NonUniqueIndex Then
+     ElseIf m_Columns(iCol).index.IndexType = NonUniqueIndex Then
         'we have a non-unique index - let's traverse the index
         '§§§ to be implemented - for the time being let's use linear search §§§
-        lPointer = LinearSearch(SearchFor, match, Index, Start)
+        lPointer = LinearSearch(SearchFor, match, index, Start)
         
      Else
         'Index Type is not defined properly - use linear search
-        lPointer = LinearSearch(SearchFor, match, Index, Start)
+        lPointer = LinearSearch(SearchFor, match, index, Start)
         
     End If
 
@@ -3300,7 +3322,7 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, Index A
 End Function
 
 
-Private Function LinearSearch(SearchFor As Variant, match As MatchType, Index As String, Optional Start As Long = 1) As Long
+Private Function LinearSearch(SearchFor As Variant, match As MatchType, index As String, Optional Start As Long = 1) As Long
 ' ************************************************
 ' Locate the item using exhaustive search.
 ' This function returns the pointer to the recrod, not the record itself.
@@ -3312,7 +3334,7 @@ Private Function LinearSearch(SearchFor As Variant, match As MatchType, Index As
     Dim iCol As Long
     Dim NumSearches As Long
     
-    iCol = GetColumnIndex(Index)
+    iCol = GetColumnIndex(index)
     
     For i = Start To m_NumItems
         'New code using compare function
@@ -3331,7 +3353,7 @@ Private Function LinearSearch(SearchFor As Variant, match As MatchType, Index As
     
 End Function
 
-Function BinarySearch(SearchFor As Variant, Index As String) As Long
+Function BinarySearch(SearchFor As Variant, index As String) As Long
 'Optional LastEl As Variant
 ' ************************************************
 ' Locate the item using generic binary search.
@@ -3354,7 +3376,7 @@ Function BinarySearch(SearchFor As Variant, Index As String) As Long
     Dim iCol As Long
     
     
-    iCol = GetColumnIndex(Index)
+    iCol = GetColumnIndex(index)
     
     ' account for optional arguments
     'If IsMissing(lastEl) Then LastEl = m_NumItems
@@ -3729,7 +3751,7 @@ End Sub
 
 
 
-Private Function GetColumnIndex(ByVal Index As String) As Long
+Private Function GetColumnIndex(ByVal index As String) As Long
 ' ***********************************************
 ' Get the column number of a given index
 ' Returns either the number provided (as Long rather than String)
@@ -3741,14 +3763,14 @@ Private Function GetColumnIndex(ByVal Index As String) As Long
     'initialize with Default not found = -1
     GetColumnIndex = iCol
     
-    If IsNumeric(Index) Then
+    If IsNumeric(index) Then
         'Use the Column index provided
-        iCol = CLng(Index)
+        iCol = CLng(index)
         GetColumnIndex = iCol
      Else
         'Find the column index based on the field name
         For iCol = 1 To m_NumCols
-            If m_Columns(iCol).Name = Index Then
+            If m_Columns(iCol).Name = index Then
                     GetColumnIndex = iCol
                     Exit For
             End If
@@ -3757,21 +3779,30 @@ Private Function GetColumnIndex(ByVal Index As String) As Long
     
 End Function
 
-Private Function GetColumnName(ByVal Index As Long) As String
+Private Function GetColumnName(ByVal index As Long) As String
 ' ***********************************************
 ' Get the column name of a given index
 ' ***********************************************
 
-    GetColumnName = m_Columns(Index).Name
+    GetColumnName = m_Columns(index).Name
 
 End Function
 
-Private Function IsTableColumn(ByVal Index As String) As Boolean
+Private Sub SetColumnName(ByVal index As Long, ByVal Name As String)
+' ***********************************************
+' Set the column name of a given index
+' ***********************************************
+
+    m_Columns(index).Name = Name
+
+End Sub
+
+Private Function IsTableColumn(ByVal index As String) As Boolean
 ' ***********************************************
 ' Checks if the column Name
 ' ***********************************************
     
-    If GetColumnIndex(Index) = -1 Then
+    If GetColumnIndex(index) = -1 Then
         IsTableColumn = False
      Else
         IsTableColumn = True
@@ -3780,7 +3811,7 @@ Private Function IsTableColumn(ByVal Index As String) As Boolean
 
 End Function
 
-Private Sub SetSortedColumn(Index As Long)
+Private Sub SetSortedColumn(index As Long)
 ' ***********************************************
 ' Sets the "IsSorted" flag for a given column
 ' ***********************************************
@@ -3789,7 +3820,7 @@ Private Sub SetSortedColumn(Index As Long)
     Dim i As Long
 
     For i = LBound(m_Columns) To UBound(m_Columns)
-        If i = Index Then
+        If i = index Then
             m_Columns(i).IsSorted = True
          Else
             m_Columns(i).IsSorted = False
@@ -4234,7 +4265,7 @@ Private Sub SplitCSV(Expression As String, ResultSplit() As String, ResultCols A
     End If
 End Sub
 
-Public Function ParseCSV03(ByRef Expression As String, asValues() As String, Optional stSeparator As String = ";", Optional stQuote As String = """") As Long
+Private Function ParseCSV03(ByRef Expression As String, asValues() As String, Optional stSeparator As String = ";", Optional stQuote As String = """", Optional bKeepQuotes As Boolean = False) As Long
 ' by Donald, donald@xbeat.net, 20020603, rev 20020701
 ' modifications and enhancements by Daniel Grass, 20200830
 
@@ -4302,6 +4333,10 @@ Public Function ParseCSV03(ByRef Expression As String, asValues() As String, Opt
 
 
     abExpression = Expression         ' to byte array
+    
+    'debug only
+    'DebugByteArray abExpression
+    
     ubValues = lCounter + 1
     ReDim Preserve asValues(1 To ubValues) ' init array to the count of occurences of the separator (Preserve is faster)
     
@@ -4393,13 +4428,17 @@ Public Function ParseCSV03(ByRef Expression As String, asValues() As String, Opt
         If lState = lValueNone Then
           ' starts quoted value
           lState = lValueQuoted
-          ' trims the opening quote
-          posStart = i + 2
+          If bKeepQuotes = False Then
+            ' trims the opening quote
+            posStart = i + 2
+          End If
         ElseIf lState = lValueQuoted Then
           ' ends quoted value, or is a quote within
           lState = lValuePlain
-          ' trims the closing quote
-          cntTrim = 2
+          If bKeepQuotes = False Then
+            ' trims the closing quote
+            cntTrim = 2
+          End If
         End If
       
       Case Else
@@ -4434,3 +4473,17 @@ Public Function ParseCSV03(ByRef Expression As String, asValues() As String, Opt
 End Function
 
 
+
+Private Sub DebugByteArray(ByRef abIn() As Byte)
+    
+    Dim iCnt As Long
+    Dim stOut As String
+
+    For iCnt = LBound(abIn) To UBound(abIn) Step 2
+        stOut = stOut & Format(abIn(iCnt), "00") & "-" & Format(abIn(iCnt + 1), "00") & "|"
+    Next iCnt
+
+    Debug.Print "Byte Array: " & stOut
+
+
+End Sub
