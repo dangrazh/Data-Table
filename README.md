@@ -23,9 +23,12 @@ The Data-Table class exposes the following Attributes and Methods.
 |Get        | ClassName            | Returns a String containing the class name|
 |Get / Let  | Name                 | Sets/Returns a String containing the name of the data table|
 |Get        | Headers              | Returns a Collection with the column names|
+|Get        | HeaderList           | Returns a string with a comma delimited list of the column names|
 |Get        | HasHeaders           | Returns a Boolean indicating if the data tables has defined column names|
-|Get        | NumItems             | Returns a Long containing the number of records in the data table|
-|Get        | NumCols              | Returns a Long containing the number of columns in the data table|
+|Get        | RecordCount          | Returns a Long containing the number of records in the data table|
+|Get        | ColumnCount          | Returns a Long containing the number of columns in the data table|
+|Get        | NumItems             | (Legacy - do not use anymore) Returns a Long containing the number of records in the data table|
+|Get        | NumCols              | (Legacy - do not use anymore) Returns a Long containing the number of columns in the data table|
 |Get / Let  | GarbageCollection    | Sets/Returns a Boolean indicating if garbage collection is active|
 |Get / Let  | ObjectStorageEnabled | Sets/Returns a Boolean indicating if object can be stored in the data table|
 |Get        | TableSummary         | Returns a String containing a summary of the data table including as name, no of records, no of columns|
@@ -43,6 +46,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |------------------|------------|------------|
 |DefineTable       | NoOfColumns As Long, Optional ColumnHeaders As String = "n/a", Optional NoOfRows As Long = 1| Define the structure of the table. This is the frist thing to do after creating the object, unless you load a range or a delimited file.|
 |CreateEmptyCopy       | --| Creates an empty copy of the data table including structure but without any data or indices being copied|
+|ColumnsAdd        | ParamArray NewColumns() As Variant | Add 1..n new columns to an existing Data-Table|
 |AnalyzeDataTypes  | --|§§§ Not yet implemented §§§|
 |IndexAdd          | ColumnName As String, idxType As IndexType|Add an index to the specified column|
 |IndexRemove       | ColumnName As String|Add the index from the specified column|
@@ -54,7 +58,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |RecordRemove      | ByVal Position As Long| Delete a single record from the data table|
 |LoadRange         | InputTable As Range, TableHasHeaders As Boolean| Load an MS Excel worksheet range into an empty data table. Note: if you load a range, you do not have to define the data table before.|
 |LoadDelimTextFile | Filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """" | Load a delimited text file into an empty data table. Note: if you load a delimited text file, you do not have to define the data table before.|
-|AppendToTable     | --|§§§ Not yet implemented §§§|
+|AppendToTable     | tSource As cDataTable, Optional tyAppend As AppendType|Append another Data-Table to this Data-Table|
 |RsMoveFirst       | --|Move the RSBookmark to the first record in the data table|
 |RsMoveLast        | --|Move the RSBookmark to the last record in the data table|
 |RsMoveNext        | --|Move the RSBookmark to the next record in the data table| 
