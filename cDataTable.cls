@@ -127,6 +127,11 @@ Public Enum SelectionType
     selectRow = 2
 End Enum
 
+Public Enum AppendType
+    appendMatchingFieldsOnly = 1
+    appendAndCreateMissingFields = 2
+End Enum
+
 Private Enum ResizeType
     IncludingWantFreeSpace = 1
     WithoutEmptyTrailRecords = 2
@@ -203,10 +208,12 @@ End Type
 '# Private Variables
 '#======================================================================================================================
 Private m_Name As String                        ' The name of the data table
+Private m_DataSource As Variant                 ' A reference to the data source
 Private m_List() As Variant                     ' The list array.
 Private m_IdxToList() As Long                   ' The index table to access the list array
 Private m_ListTransposed() As Variant           ' The transposed list array
 Private m_NumCols As Long                       ' Number of Columns
+Private m_NumRecs As Long                       ' Number of Records
 Private m_NumItems As Long                      ' Last index in use.
 Private m_ArraySize As Long                     ' Size of the list array.
 Private m_ShrinkWhen As Long                    ' Shrink if m_NumItems < this.
@@ -246,8 +253,9 @@ Private Sub Class_Initialize()
     ReDim m_List(1, 1)
     ReDim m_IdxToList(1 To 1)
     
-    'set the default name
+    'set the default name and data source
     m_Name = "DataTable"
+    m_DataSource = "None"
     
     'initialze the boolean states
     m_HasHeaders = False
@@ -325,7 +333,11 @@ Public Property Get Version() As String
    'Version = "Version 1.2.4.0 (10/2020)"   'Added new features to copy the table structure (but not the data) and to be able to slect a distinct set of data for a given list of columns
                                             'Added enhanced error handling for RSFindNext in combination with unique indexed columns as well as unknown column names to prevent "slient missbehaviour"
    'Version = "Version 1.2.5.0 (07/2021)"   'Added new properties to check if column exists and to set a column name
-   Version = "Version 1.2.5.1 (07/2021)"    'Bug fix in the ParseCSV003 procedure to poperly process quoted strings
+   'Version = "Version 1.2.5.1 (09/2021)"   'Bug fix in the ParseCSV003 procedure to poperly process quoted strings
+   'Version = "Version 1.2.5.2 (09/2021)"   'Bug fix: m_NumItems is "out of sync" when records are deleted but garbage collection has not happened yet
+                                            'to fix this a new attribute m_NumRecs / RecordCount was introduced, being maintained on creation and deletion of records
+                                            'finally to remain consistent a new attribute ColumnCount was introduced as well
+    Version = "Version 1.2.6.0 (09/2021)"   'Added new methods ColumnsAdd and AppendToTable
 
    
 
@@ -423,10 +435,43 @@ End Property
 
 Public Property Get NumItems() As Long
 ' ***********************************************
-' Return the number of items.
+' Return the number of records.
+' Replaced by RecordsCount but left for backward
+' compatability
 ' ***********************************************
 
-    NumItems = m_NumItems
+    NumItems = m_NumRecs
+
+End Property
+
+Public Property Get NumCols() As Long
+' ***********************************************
+' Return the number of columns.
+' Replaced by ColumnsCount but left for backward
+' compatability
+' ***********************************************
+
+        NumCols = m_NumCols
+
+End Property
+
+
+Public Property Get ColumCount() As Long
+' ***********************************************
+' Return the number of records.
+' ***********************************************
+
+    ColumCount = m_NumCols
+
+End Property
+
+
+Public Property Get RecordCount() As Long
+' ***********************************************
+' Return the number of records.
+' ***********************************************
+
+    RecordCount = m_NumRecs
 
 End Property
 
@@ -436,15 +481,6 @@ Private Property Get ArraySize() As Long
 ' ***********************************************
 
     ArraySize = m_ArraySize
-
-End Property
-
-Public Property Get NumCols() As Long
-' ***********************************************
-' Return the number of columns.
-' ***********************************************
-
-        NumCols = m_NumCols
 
 End Property
 
@@ -504,12 +540,15 @@ Public Property Get TableSummary() As String
 
     TableSummary = "Table Name:          " & m_Name & vbCrLf & _
                     "No of Columns:      " & m_NumCols & vbCrLf & _
-                    "No of Records:      " & m_NumItems & vbCrLf & _
+                    "No of Records:      " & m_NumRecs & vbCrLf & _
                     "Objects enabled:    " & m_EnableObjects & vbCrLf & _
                     "Gargabe Collection: " & m_CollectGarbage & vbCrLf & _
                     "Bookmark:           " & m_Bookmark & vbCrLf & _
                     "Beginning of File:  " & m_BOF & vbCrLf & _
-                    "End of File:        " & m_EOF
+                    "End of File:        " & m_EOF & vbCrLf & _
+                                         vbCrLf & _
+                    "Columns:            " & vbCrLf & _
+                    Me.HeaderList
 
 End Property
 
@@ -1049,6 +1088,7 @@ Public Sub TruncateTable(AskForConfirmation As Boolean)
     ReDim m_List(1 To m_NumCols, 1 To 1)
     'reset the number of items to 0
     m_NumItems = 0
+    m_NumRecs = 0
     'reset the array size to 1
     m_ArraySize = 1
     
@@ -1183,6 +1223,7 @@ Public Sub RecordAddOld(ByVal aRecord As Variant)
     
             'increase the row index
             m_NumItems = m_NumItems + 1
+            m_NumRecs = m_NumRecs + 1
             'resize the list if required
             If m_NumItems > m_ArraySize Then ResizeList (IncludingWantFreeSpace)
 
@@ -1248,6 +1289,7 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
                 
             'increase the row index
             m_NumItems = m_NumItems + 1
+            m_NumRecs = m_NumRecs + 1
             'resize the list if required
             If m_NumItems > m_ArraySize Then ResizeList (IncludingWantFreeSpace)
 
@@ -1329,6 +1371,9 @@ Public Sub RecordRemove(ByVal Position As Long)
     'increase the garbage counter
     m_GarbageCount = m_GarbageCount + 1
     
+    'decrease the records count
+    m_NumRecs = m_NumRecs - 1
+    
     'Update the 1st and the last garbage if required
     If Position < m_FirstGarbage Or m_FirstGarbage = 0 Then
         m_FirstGarbage = Position
@@ -1352,6 +1397,132 @@ Public Sub RecordRemove(ByVal Position As Long)
     'handle thread safety
     ReleaseLock
 
+        
+End Sub
+
+
+Public Sub ColumnsAdd(ParamArray NewColumns() As Variant)
+' ***********************************************
+' Add one to many columns to the end of the table
+' ***********************************************
+
+
+        Dim iCol As Long
+        Dim iColCount As Long
+        Dim iColsNew As Long
+        Dim NewCols() As Variant
+        Dim iCntNewCols As Long
+        Dim iOffset As Long
+                
+        Dim ListTemp() As Variant
+        Dim ptrList As LongPtr
+        Dim ptrListTransposed As LongPtr
+        Dim ptrListTemp As LongPtr
+        
+        'handle thread safety
+        CheckLockStatus
+        LockForUpdate
+        
+        
+        '###
+        'Step 1: transpose m_list -> m_ListTransposed
+        '###
+        Call Transpose
+
+
+        '###
+        'Step 2: add the new fields to m_ListTransposed
+        '###
+        
+        'check if the 1st element of the passed paramarray is an array itself
+        If IsArray(NewColumns(LBound(NewColumns))) Then
+            'move the array in the 1st element to the array -> i.e. decompose the passed array
+            ReDim NewCols(LBound(NewColumns(LBound(NewColumns))) To UBound(NewColumns(LBound(NewColumns))))
+            For iCntNewCols = LBound(NewColumns(LBound(NewColumns))) To UBound(NewColumns(LBound(NewColumns)))
+                NewCols(iCntNewCols) = NewColumns(LBound(NewColumns))(iCntNewCols)
+            Next
+            iOffset = 0
+         Else
+            NewCols = NewColumns
+            iOffset = 1
+        End If
+        
+        'get the number of new columns to be added
+        iColsNew = (UBound(NewCols) - LBound(NewCols)) + 1
+                
+        'Add the new columns to the header info
+        iColCount = m_NumCols + iColsNew
+        ReDim Preserve m_Columns(1 To iColCount)
+        For iCol = m_NumCols + 1 To iColCount
+                m_Columns(iCol).Name = NewCols(iCol - (m_NumCols + iOffset))
+                m_Columns(iCol).Number = iCol
+                m_Columns(iCol).IsSorted = False
+                m_Columns(iCol).IsIndexed = False
+                m_Columns(iCol).Type = dtVariant
+        Next iCol
+
+        'add the new fields to m_ListTransposed
+        ReDim Preserve m_ListTransposed(1 To m_ArraySize, 1 To iColCount)
+
+        'update the m_NumCols attribute
+        m_NumCols = iColCount
+        
+        
+        '###
+        'Step 3: move m_ListTransposed to m_List
+        '        This interim step is necessary, as Transpose does only work in one direction
+        '###
+        
+        'Performance Improvement: rather than copying the transposed list into the list to
+        'transpose it back, simply swap the pointers to the base array info
+        'To do so, we need three pointers to the descriptor of m_List, m_ListTransposed and a temp list we need
+        'as a temporary buffer to store the pointer
+                    
+        'Get the pointers to the SafeArray
+        ptrList = getSafeArrayDescrPtr(m_List)
+        ptrListTransposed = getSafeArrayDescrPtr(m_ListTransposed)
+        ptrListTemp = getSafeArrayDescrPtr(ListTemp)
+        
+        'Swap list Transposed and List
+        Call CopyMemory(ByVal ptrListTemp, ByVal ptrList, PTR_LENGTH)
+        Call CopyMemory(ByVal ptrList, ByVal ptrListTransposed, PTR_LENGTH)
+        Call CopyMemory(ByVal ptrListTransposed, ByVal ptrListTemp, PTR_LENGTH)
+        
+        'clean pointer of temp list to avoid crash on extiting the programm
+        Call CopyMemory(ByVal ptrListTemp, 0&, PTR_LENGTH)
+
+
+        '###
+        'Step 4: Transpose m_list -> m_ListTransposed
+        '###
+        Call Transpose
+
+        '###
+        'Step 5: Swap m_ListTransposed to m_List
+        '        Final step to put the transposed list back into m_List
+        '###
+        
+        'Performance Improvement: rather than copying the transposed list into the list to
+        'transpose it back, simply swap the pointers to the base array info
+        'To do so, we need three pointers to the descriptor of m_List, m_ListTransposed and a temp list we need
+        'as a temporary buffer to store the pointer
+                    
+        'Get the pointers to the SafeArray
+        ptrList = getSafeArrayDescrPtr(m_List)
+        ptrListTransposed = getSafeArrayDescrPtr(m_ListTransposed)
+        ptrListTemp = getSafeArrayDescrPtr(ListTemp)
+        
+        'Swap list Transposed and List
+        Call CopyMemory(ByVal ptrListTemp, ByVal ptrList, PTR_LENGTH)
+        Call CopyMemory(ByVal ptrList, ByVal ptrListTransposed, PTR_LENGTH)
+        Call CopyMemory(ByVal ptrListTransposed, ByVal ptrListTemp, PTR_LENGTH)
+        
+        'clean pointer of temp list to avoid crash on extiting the programm
+        Call CopyMemory(ByVal ptrListTemp, 0&, PTR_LENGTH)
+        
+        'handle thread safety
+        ReleaseLock
+        
         
 End Sub
 
@@ -1429,6 +1600,7 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
         'Debug.Print "Assigning the input range to the variant array took: " & mTimer.MillisecondsElapsed & " milliseconds..."
         
         m_NumItems = UBound(m_List)
+        m_NumRecs = UBound(m_List)
         m_ArraySize = UBound(m_List)
         m_NumCols = UBound(m_List, 2)
         
@@ -1551,10 +1723,12 @@ Private Sub LoadDelimTextFileMemCpy(filename As String, Optional FieldDelimiter 
             ReDim m_List(1 To iCols, 1 To iRows - 1)
             m_ArraySize = iRows - 1
             m_NumItems = iRows - 1
+            m_NumRecs = iRows - 1
          Else
             ReDim m_List(1 To iCols, 1 To iRows)
             m_ArraySize = iRows
             m_NumItems = iRows
+            m_NumRecs = iRows
         End If
         m_NumCols = iCols
 
@@ -1662,10 +1836,12 @@ Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter
             ReDim m_List(1 To retValCols, 1 To retValRows - 1)
             m_ArraySize = retValRows - 1
             m_NumItems = retValRows - 1
+            m_NumRecs = retValRows - 1
          Else
             ReDim m_List(1 To retValCols, 1 To retValRows)
             m_ArraySize = retValRows
             m_NumItems = retValRows
+            m_NumRecs = retValRows
         End If
         m_NumCols = retValCols
 
@@ -1735,82 +1911,88 @@ Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter
 End Sub
 
 
-Public Sub AppendToTable(ByRef tSource As cDataTable)
+Public Sub AppendToTable(ByRef tSource As cDataTable, Optional tyAppend As AppendType = appendMatchingFieldsOnly)
 ' ***********************************************
 ' Append the data of a given cDataTable object to the list
 ' ***********************************************
 
-    Dim lSourceColCount As Long
-    Dim lTargetColCount As Long
-    Dim lSturctureCheck As Long
-    Dim lHeaderCheck As Long
-    Dim lNewColCount As Long
-    Dim arrFieldMapping() As Variant
-    Dim i As Long
-    Dim k As Long
+    Dim tFieldMap As cDataTable
+    Dim stField As Variant
+    Dim aNewFields() As String
+    Dim iCntNewFields As Long: iCntNewFields = 0
     
-    lSourceColCount = tSource.NumCols
-    lTargetColCount = Me.NumCols
+    Set tFieldMap = New cDataTable
     
-    ReDim arrFieldMapping(1 To lSourceColCount, 1 To 2)
+    tFieldMap.DefineTable 2, "Target Record, Source Record", 20
     
-    '§§§ UNDER CONSTRUCTION !!! §§§
-    
-    
-    '1. Check if structure is the same
-    If lSourceColCount = lTargetColCount Then
-        'the tables have the same no of columns
-        'let's check if they are in the same order
-        If tSource.HasHeaders = True Then
-            For i = 1 To lSourceColCount
-                'create the source mapping in case needed
-                arrFieldMapping(i, 1) = tSource.ItemName(i)
-                If tSource.ItemName(i) = Me.ItemName(i) Then
-                    'Source and Target Column are the same
-                    lHeaderCheck = 1
-                 Else
-                    lHeaderCheck = 2
-                End If
-            Next i
-            
-            For i = 1 To lSourceColCount
-                For k = 1 To lSourceColCount
-                    If arrFieldMapping(i, 1) = Me.ItemName(i) Then
-                        arrFieldMapping(i, 2) = Me.ItemName(i)
-                        Exit For
-                     Else
-                        arrFieldMapping(i, 2) = "No Match"
-                    End If
-                        
-               Next k
-            
-                'check if we found a match
-                If arrFieldMapping(i, 2) = "No Match" Then
-                    'raise error -> the column names do not match
-                    ' For class errors, you add vbObjectError to the error number.
-                    Err.Raise vbObjectError + m_Errors(7).errNumber, Me.Name, m_Errors(7).errDescrption
+    If tyAppend = appendAndCreateMissingFields Then
+        'add the structure of the target record
+        For Each stField In Me.Headers
+            tFieldMap.RecordAdd stField
+        Next
+        
+        'check new fields that need to be created
+        For Each stField In tSource.Headers
+            tFieldMap.RsFindFirst "Target Record", Equals, stField
+            If tFieldMap.RsEOF Then
+                'missing field, let's add it to the list of new fields to be added
+                iCntNewFields = iCntNewFields + 1
+                ReDim Preserve aNewFields(1 To iCntNewFields)
+                aNewFields(iCntNewFields) = stField
+            End If
+        Next
 
-                End If
-            Next i
-        End If
-                
-        lSturctureCheck = 1
-     ElseIf lSourceColCount > lTargetColCount Then
-        'the source has more columns than the target
-        lNewColCount = lSourceColCount
-        lSturctureCheck = 2
-     ElseIf lSourceColCount < lTargetColCount Then
-        'the source has less columns, let's append what we have
-        lSturctureCheck = 3
+        'add the new fields to the table
+        Me.ColumnsAdd aNewFields
+    
+        'truncate the field mapping table, we need this now in a clean state
+        tFieldMap.TruncateTable False
     End If
-     
-                 
-    '2.
+    
+    
+    'add the structure of the target record
+    For Each stField In Me.Headers
+        tFieldMap.RecordAdd stField
+    Next
 
+    'add the matching fields of the source record
+    For Each stField In tSource.Headers
+        tFieldMap.RsFindFirst "Target Record", Equals, stField
+        If Not tFieldMap.RsEOF Then
+            'matching field, let's add it to the source record
+            tFieldMap.Item("Source Record") = stField
+        End If
+    Next
 
-    '§§§ UNDER CONSTRUCTION !!! §§§
+    
+    
+    'now process that actual data
+    tSource.RsMoveFirst
+    Do While Not tSource.RsEOF
 
+        'add an empty record
+        Me.RecordAdd "", ""
+        'set the bookmark to the last record, i.e. the freshly crated
+        Me.RsMoveLast
 
+        tFieldMap.RsMoveFirst
+        Do While Not tFieldMap.RsEOF
+            'check if the source record field is not empty
+            If IsEmpty(tFieldMap.Item("Source Record")) = True Then
+                'skip the record
+             Else
+                'process the record
+                Me.Item(tFieldMap.Item("Target Record")) = tSource.Item(tFieldMap.Item("Source Record"))
+            End If
+         tFieldMap.RsMoveNext
+         DoEvents
+        Loop
+
+     tSource.RsMoveNext
+     DoEvents
+    Loop
+    
+    
 End Sub
 
 
