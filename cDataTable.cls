@@ -928,7 +928,7 @@ Public Sub AnalyzeDataTypes()
 ' and determine the data type of the column
 ' ***********************************************
 
-    '��� Future feature ���
+    '§§§ Future feature §§§
         
     Dim iCol As Long
     Dim dblPctSampleSize As Double: dblPctSampleSize = 0.1
@@ -945,14 +945,14 @@ Public Sub AnalyzeDataTypes()
         Me.RsBookmark = lStepSize * lCount
         Do While Not Me.RsEOF
             'determine type & keep statistics
-            '��� pending implementation ���
+            '§§§ pending implementation §§§
             
          lCount = lCount + 1
          Me.RsBookmark = lStepSize * lCount
         Loop
     
         'get entry with most counts
-        '§§§ pending implementation §§§
+        'Â§Â§Â§ pending implementation Â§Â§Â§
         
         'update the data type of the column
         m_Columns(iCol).Type = tyCol
@@ -1052,7 +1052,7 @@ End Sub
 ' Refresh all indices in the table
 ' ***********************************************
 
-        '§§§ Future feature §§§
+        'Â§Â§Â§ Future feature Â§Â§Â§
 
 'End Sub
 
@@ -1061,7 +1061,7 @@ End Sub
 ' Refresh all stats and indices
 ' ***********************************************
 
-        '§§§ Future feature §§§
+        'Â§Â§Â§ Future feature Â§Â§Â§
 
 'End Sub
 
@@ -1971,7 +1971,7 @@ Public Sub AppendToTable(ByRef tSource As cDataTable, Optional tyAppend As Appen
     Do While Not tSource.RsEOF
 
         'add an empty record
-        Me.RecordAdd "", ""
+        Me.RecordAdd ""
         'set the bookmark to the last record, i.e. the freshly crated
         Me.RsMoveLast
 
@@ -2347,17 +2347,17 @@ Private Sub RsFind(index As Variant, match As MatchType, Criteria As Variant)
         m_EOF = True
     End If
     
-    '§§§
-    '§§§ CONSTRUCTION SITE!! NEED TO FIGURE OUT HOW TO RESOLVE THE CRITERIA INTO A EXECUTABLE SEARCH!! §§§
-    '§§§ TEMPORARY SOLUTION IS TO USE LINEAR SEARCH ON ONE COLUMN ONLY... §§§
-    '§§§
+    'Â§Â§Â§
+    'Â§Â§Â§ CONSTRUCTION SITE!! NEED TO FIGURE OUT HOW TO RESOLVE THE CRITERIA INTO A EXECUTABLE SEARCH!! Â§Â§Â§
+    'Â§Â§Â§ TEMPORARY SOLUTION IS TO USE LINEAR SEARCH ON ONE COLUMN ONLY... Â§Â§Â§
+    'Â§Â§Â§
     
 '    For iIdx = lPointer To m_NumItems
 '    Next iIdx
 
-    '§§§
-    '§§§ END OF CONSTRUCTION SITE
-    '§§§
+    'Â§Â§Â§
+    'Â§Â§Â§ END OF CONSTRUCTION SITE
+    'Â§Â§Â§
 
 
 End Sub
@@ -2395,7 +2395,7 @@ Private Function SelectData(FieldList As String, WhereClause As String, Optional
     Set tOut = New cDataTable
     Set htKeys = New cHashTable
 
-    '��� Future feature ���
+    '§§§ Future feature §§§
     
     '0. Parse field list
     '1. Define Output data table structure based on field List
@@ -2818,7 +2818,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
 '
 '        End If
 '
-'        '§§§ not sure this works as version with header is the same as version without header... §§§
+'        'Â§Â§Â§ not sure this works as version with header is the same as version without header... Â§Â§Â§
 '
     End If
     
@@ -2943,12 +2943,12 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                 If Not IsTableColumn(SortOrder(i + 1)) Then
                     If UCase(SortOrder(i + 1)) = "ASC" Then
                         ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                        Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))              '§§§ changed to 2nd dimension
+                        Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))              'Â§Â§Â§ changed to 2nd dimension
                         'm_SortedColumn = iColToSort
                         SetSortedColumn iColToSort
                      ElseIf UCase(SortOrder(i + 1)) = "DESC" Then
                         ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                        Call MergeSortDesc(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))          '§§§ changed to 2nd dimension
+                        Call MergeSortDesc(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))          'Â§Â§Â§ changed to 2nd dimension
                         'm_SortedColumn = iColToSort
                         SetSortedColumn iColToSort
                      Else
@@ -2957,7 +2957,7 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                     End If
                  Else
                     ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  '§§§ changed to 2nd dimension
+                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  'Â§Â§Â§ changed to 2nd dimension
                     'm_SortedColumn = iColToSort
                     SetSortedColumn iColToSort
                End If
@@ -2965,7 +2965,7 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                 'we are looking at the last parameter - only process if it is a numeric pointer to the column to sort
                 If IsTableColumn(SortOrder(i)) Then
                     ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  '§§§ changed to 2nd dimension
+                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  'Â§Â§Â§ changed to 2nd dimension
                     'm_SortedColumn = iColToSort
                     SetSortedColumn iColToSort
                 End If
@@ -2995,8 +2995,8 @@ Private Sub MergeSort(List() As Variant, ColToSort As Long, Scratch() As Variant
     Dim iCols As Long
     
     'Determine the number of Columns of the list
-    Dim iColLower As Long: iColLower = LBound(List)          '§§§ changed to 1st dimension
-    Dim iColUpper As Long: iColUpper = UBound(List)          '§§§ changed to 1st dimension
+    Dim iColLower As Long: iColLower = LBound(List)          'Â§Â§Â§ changed to 1st dimension
+    Dim iColUpper As Long: iColUpper = UBound(List)          'Â§Â§Â§ changed to 1st dimension
     
 
     ' If the list has no more than C_CUT_OFF elements,
@@ -3392,7 +3392,7 @@ Private Function Search(SearchFor As Variant, match As MatchType, index As Strin
 ' ************************************************
 ' Function to search the list, currently supporting:
 ' full table search, binary search on sorted column, indexed search on uniquely indexed columns
-' §§§ Future usage considering non unique indices and data types §§§
+' Â§Â§Â§ Future usage considering non unique indices and data types Â§Â§Â§
 ' ************************************************
 
     Dim lPointer As Long
@@ -3490,7 +3490,7 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, index A
             
      ElseIf m_Columns(iCol).index.IndexType = NonUniqueIndex Then
         'we have a non-unique index - let's traverse the index
-        '��� to be implemented - for the time being let's use linear search ���
+        '§§§ to be implemented - for the time being let's use linear search §§§
         lPointer = LinearSearch(SearchFor, match, index, Start)
         
      Else
@@ -3681,7 +3681,7 @@ Private Sub TransposeMemCpy()
     
     'mTimer.Reset
     
-    '��� Performance Improvment: This might be faster by using CopyMemory at a later stage ���
+    '§§§ Performance Improvment: This might be faster by using CopyMemory at a later stage §§§
     'copy the data from m_List to m_ListTransposed
     m_ListTransposed = m_List
     'Debug.Print "HP Copying m_List to m_ListTransposed took: " & mTimer.MillisecondsElapsed & " milliseconds..."
@@ -4198,7 +4198,7 @@ Private Function GetVarType(myVar) As String
 ' Written By Shanmuga Sundara Raman for http://vbadud.blogspot.com
 ' ---------------------------------------------------------------
 
-'§§§ kept here for the sake of having all data types in one place, maybe used at a later stage §§§
+'Â§Â§Â§ kept here for the sake of having all data types in one place, maybe used at a later stage Â§Â§Â§
 
     If VarType(myVar) = vbNull Then
         GetVarType = "Null (no valid data) "
