@@ -159,7 +159,7 @@ End Enum
 
 Private Type DataColumn
     Number As Long
-    Name As String
+    name As String
     Type As ColumnType
     IsSorted As Boolean
     IsIndexed As Boolean
@@ -234,7 +234,7 @@ Private m_IsIndexed As Boolean                  ' Indicates if the class has at 
 Private m_BOF As Boolean                        ' Indicates that the cursor has reached the beginning of the table
 Private m_EOF As Boolean                        ' Indicates that the cursor has reached the end of the table
 Private m_CopyCount As Long                     ' Internal counter to keep track of the number of copies made of this data table
-Private m_Errors(1 To 13) As ErrorCode          ' List of all error codes
+Private m_Errors(1 To 14) As ErrorCode          ' List of all error codes
 
 '#Region
 '#======================================================================================================================
@@ -287,6 +287,7 @@ Private Sub Class_Initialize()
     m_Errors(11).errNumber = 522: m_Errors(11).errDescrption = "Record exeeds no of columns defined for this table. Can't append the data!"
     m_Errors(12).errNumber = 523:  m_Errors(12).errDescrption = "RSFindNext does not work for columns with a unique index! Please use RSFindFirst instead."
     m_Errors(13).errNumber = 524:  m_Errors(13).errDescrption = "Column name '[COLUMN_NAME]'count not be found!"
+    m_Errors(14).errNumber = 525: m_Errors(14).errDescrption = "Dumping to target worksheet led to the following error: "
     
 
 End Sub
@@ -324,7 +325,7 @@ Public Property Get Version() As String
    'Version = "Version 1.2.2.1 (01/2018)"   'Fixed pattern matching and SortUnstable
    'Version = "Version 1.2.2.2 (02/2018)"   'Fixed RecordAdd to handle both arrays and ParamArray
                                             'Implement enabling of object storage
-   'Version = "Version 1.2.3.0 (01/2019)"   'Added maintenance of indices, i.e. completed indexing for unique indices
+   'Version = "Version 1.2.3.0 (01/2019)"   'Added 1st version of maintenance of indices
    'Version = "Version 1.2.3.1 (05/2019)"   'Fixed WriteToCell with additional checks for wrapped output
    'Version = "Version 1.2.3.2 (01/2020)"   'Fixed m_GarbageCount reset at the end of CollectGarbage procedure
    'Version = "Version 1.2.3.2 (01/2020)"   'Fixing x64 compatibility in functions using CopyMemory
@@ -337,8 +338,14 @@ Public Property Get Version() As String
    'Version = "Version 1.2.5.2 (09/2021)"   'Bug fix: m_NumItems is "out of sync" when records are deleted but garbage collection has not happened yet
                                             'to fix this a new attribute m_NumRecs / RecordCount was introduced, being maintained on creation and deletion of records
                                             'finally to remain consistent a new attribute ColumnCount was introduced as well
-    Version = "Version 1.2.6.0 (09/2021)"   'Added new methods ColumnsAdd and AppendToTable
-
+    'Version = "Version 1.2.6.0 (09/2021)"  'Added new methods ColumnsAdd and AppendToTable
+    'Version = "Version 1.2.7.0 (10/2021)"  'Finished maintenance of indices (including RemoveRecord and CollectGarbage), i.e. completed indexing for unique indices
+    'Version = "Version 1.2.7.1 (03/2022)"  'Bug fix: Setting SortedColumn was missing in SortUnstable
+    'Version = "Version 1.2.7.2 (04/2022)"  'Bug fix: use move row instead of manual loop in CollectGarbage
+    'Version = "Version 1.2.8.0 (07/2022)"  'Enhanced LoadRange to create empty table if only header is provided
+                                            'Added property "ItemIndex" which returns the numeric index of a named Item
+   Version = "Version 1.2.8.1 (09/2022)"    'Bugfix in LoadRange when empty table if only header is provided
+                                            'Bugfix in DumpToRange error handling to avaid silent errors
    
 
 End Property
@@ -360,16 +367,16 @@ Public Property Get ClassName() As String
     
 End Property
 
-Public Property Get Name() As String
+Public Property Get name() As String
 ' ***********************************************
 ' Returns the name of the data table.
 ' ***********************************************
     
-    Name = m_Name
+    name = m_Name
     
 End Property
 
-Public Property Let Name(Value As String)
+Public Property Let name(Value As String)
 ' ***********************************************
 ' Sets the name of the data table.
 ' ***********************************************
@@ -387,7 +394,7 @@ Public Property Get Headers() As Collection
     Dim i As Long
 
     For i = LBound(m_Columns) To UBound(m_Columns)
-        cHeaders.Add m_Columns(i).Name
+        cHeaders.Add m_Columns(i).name
     Next i
     
     Set Headers = cHeaders
@@ -635,6 +642,25 @@ Public Property Let ItemName(index As Long, Value As String)
     
 End Property
 
+Public Property Get ItemIndex(name As String) As Long
+' ***********************************************
+' Return the index of the Item (Column Header)
+' ***********************************************
+
+    Dim iCol As Long
+    
+    iCol = GetColumnIndex(name)
+    
+    If iCol = -1 Then
+        'Column Name not found. release the lock and raise an error (Return Null did lead to "silent missbehavior")
+        'ItemGet = Null
+        Err.Raise vbObjectError + m_Errors(13).errNumber, Me.name, Replace(m_Errors(13).errDescrption, "[COLUMN_NAME]", name)
+     Else
+        ItemIndex = iCol
+    End If
+
+End Property
+
 
 Public Property Get ItemExists(index As Variant) As Boolean
 ' ***********************************************
@@ -644,6 +670,17 @@ Public Property Get ItemExists(index As Variant) As Boolean
     ItemExists = IsTableColumn(index)
 
 End Property
+
+Public Property Get ItemRaw(Row As Long, Column As Long) As Variant
+' ***********************************************
+' Return a given item at index / position
+' No safety checks, no thread safety for max speed
+' ***********************************************
+    
+    ItemRaw = m_List(Column, Row)
+    
+End Property
+
 
 
 Public Property Get Item(index As Variant, Optional Row As Long = -1) As Variant
@@ -656,7 +693,7 @@ Public Property Get Item(index As Variant, Optional Row As Long = -1) As Variant
         'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
         ReleaseLock
-        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
+        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
         If m_EnableObjects = True Then
@@ -698,7 +735,7 @@ Public Property Let Item(index As Variant, Optional Row As Long = -1, Value As V
         'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
         ReleaseLock
-        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
+        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
             Call ItemSet(Row, CStr(index), Value)
@@ -727,7 +764,7 @@ Public Property Get Record(Optional Row As Long = -1) As Variant()
         'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
         ReleaseLock
-        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
+        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
         Position = Row
@@ -774,7 +811,7 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
         'release the lock and raise error as we need either of the information
         ' For class errors, you add vbObjectError to the error number.
         ReleaseLock
-        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
+        Err.Raise vbObjectError + m_Errors(6).errNumber, Me.name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
         Position = Row
@@ -792,7 +829,7 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
         ' The range 513-65535 is available for user errors.
         ' For class errors, you add vbObjectError to the error number.
         ReleaseLock
-        Err.Raise vbObjectError + m_Errors(4).errNumber, Me.Name, m_Errors(4).errDescrption
+        Err.Raise vbObjectError + m_Errors(4).errNumber, Me.name, m_Errors(4).errDescrption
      Else
 
 
@@ -818,7 +855,7 @@ Public Property Let Record(Optional Row As Long = -1, Record() As Variant)
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
             ReleaseLock
-            Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
+            Err.Raise vbObjectError + 515, Me.name, "The no of items in the input record does not match the number of columns in the data table!"
         End If
                 
     End If
@@ -850,7 +887,7 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
         'Name the Fields Field<n> if no field list is provided
         If ColumnHeaders = "n/a" Or (NoOfColumns < 1 And InStr(ColumnHeaders, ",") = 0) Then
                 For i = 1 To NoOfColumns
-                        m_Columns(i).Name = "Field" & i
+                        m_Columns(i).name = "Field" & i
                         m_Columns(i).Number = i
                         m_Columns(i).IsSorted = False
                         m_Columns(i).IsIndexed = False
@@ -863,7 +900,7 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
                 aTmp = Split(ColumnHeaders, ",")
                 If UBound(aTmp) + 1 = NoOfColumns Then
                     For i = 1 To UBound(aTmp) + 1
-                            m_Columns(i).Name = Trim(aTmp(i - 1))
+                            m_Columns(i).name = Trim(aTmp(i - 1))
                             m_Columns(i).Number = i
                             m_Columns(i).IsSorted = False
                             m_Columns(i).IsIndexed = False
@@ -877,12 +914,12 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
                     ' The range 513-65535 is available for user errors.
                     ' For class errors, you add vbObjectError to the error number.
                     ReleaseLock
-                    Err.Raise vbObjectError + 514, Me.Name, "The list of Header Names does not match the number of columns you specified!"
+                    Err.Raise vbObjectError + 514, Me.name, "The list of Header Names does not match the number of columns you specified!"
                 End If
           ElseIf ColumnHeaders <> "n/a" And NoOfColumns = 1 Then
             'table with a single named column
             i = 1
-            m_Columns(i).Name = ColumnHeaders
+            m_Columns(i).name = ColumnHeaders
             m_Columns(i).Number = 1
             m_Columns(i).IsSorted = False
             m_Columns(i).IsIndexed = False
@@ -896,7 +933,7 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
             ReleaseLock
-            Err.Raise vbObjectError + 514, Me.Name, "The list of Header Names does not match the number of columns you specified!"
+            Err.Raise vbObjectError + 514, Me.name, "The list of Header Names does not match the number of columns you specified!"
         End If
         
 End Sub
@@ -914,7 +951,7 @@ Public Function CreateEmptyCopy() As cDataTable
     With tOut
         .GarbageCollection = m_CollectGarbage
         .HasHeaders = m_HasHeaders
-        .Name = m_Name & "_" & m_CopyCount
+        .name = m_Name & "_" & m_CopyCount
         .ObjectStorageEnabled = m_EnableObjects
     End With
     
@@ -928,7 +965,7 @@ Public Sub AnalyzeDataTypes()
 ' and determine the data type of the column
 ' ***********************************************
 
-    '§§§ Future feature §§§
+    '��� Future feature ���
         
     Dim iCol As Long
     Dim dblPctSampleSize As Double: dblPctSampleSize = 0.1
@@ -945,14 +982,14 @@ Public Sub AnalyzeDataTypes()
         Me.RsBookmark = lStepSize * lCount
         Do While Not Me.RsEOF
             'determine type & keep statistics
-            '§§§ pending implementation §§§
+            '��� pending implementation ���
             
          lCount = lCount + 1
          Me.RsBookmark = lStepSize * lCount
         Loop
     
         'get entry with most counts
-        'Â§Â§Â§ pending implementation Â§Â§Â§
+        '§§§ pending implementation §§§
         
         'update the data type of the column
         m_Columns(iCol).Type = tyCol
@@ -1036,12 +1073,21 @@ Private Sub IndexItemRemove(stValue As String, iColumn As Long, iPosition As Lon
 End Sub
 
 
-Private Sub IndexItemUpdate(stValueOld As String, stValueNew As String, iColumn As Long, iPosition As Long)
+Private Sub IndexItemUpdateValue(stValueOld As String, stValueNew As String, iColumn As Long, iPosition As Long)
 ' ***********************************************
 ' Update a specific item in the index
 ' ***********************************************
     
-    m_Columns(iColumn).index.ItemUpdate stValueOld, stValueNew, iPosition
+    m_Columns(iColumn).index.ItemUpdateValue stValueOld, stValueNew, iPosition
+
+End Sub
+
+Private Sub IndexItemUpdatePosition(stValue As String, iColumn As Long, iPositionOld As Long, iPositionNew As Long)
+' ***********************************************
+' Update a specific item in the index
+' ***********************************************
+    
+    m_Columns(iColumn).index.ItemUpdatePosition stValue, iPositionOld, iPositionNew
 
 End Sub
 
@@ -1052,7 +1098,7 @@ End Sub
 ' Refresh all indices in the table
 ' ***********************************************
 
-        'Â§Â§Â§ Future feature Â§Â§Â§
+        '§§§ Future feature §§§
 
 'End Sub
 
@@ -1061,7 +1107,7 @@ End Sub
 ' Refresh all stats and indices
 ' ***********************************************
 
-        'Â§Â§Â§ Future feature Â§Â§Â§
+        '§§§ Future feature §§§
 
 'End Sub
 
@@ -1130,7 +1176,7 @@ Private Function ItemGet(ByVal Position As Long, ByVal index As String) As Varia
             'Column Name not found. release the lock and raise an error (Return Null did lead to "silent missbehavior")
             'ItemGet = Null
             ReleaseLock
-            Err.Raise vbObjectError + m_Errors(13).errNumber, Me.Name, Replace(m_Errors(13).errDescrption, "[COLUMN_NAME]", index)
+            Err.Raise vbObjectError + m_Errors(13).errNumber, Me.name, Replace(m_Errors(13).errDescrption, "[COLUMN_NAME]", index)
          Else
             ' Return the item.
             'ItemGet = m_List(iCol, position)
@@ -1167,7 +1213,7 @@ Private Sub ItemSet(ByVal Position As Long, ByVal index As String, Value As Vari
         ' The range 513-65535 is available for user errors.
         ' For class errors, you add vbObjectError to the error number.
         ReleaseLock
-        Err.Raise vbObjectError + m_Errors(4).errNumber, Me.Name, m_Errors(4).errDescrption
+        Err.Raise vbObjectError + m_Errors(4).errNumber, Me.name, m_Errors(4).errDescrption
     Else
     
         iCol = GetColumnIndex(index)
@@ -1176,7 +1222,7 @@ Private Sub ItemSet(ByVal Position As Long, ByVal index As String, Value As Vari
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
             ReleaseLock
-            Err.Raise vbObjectError + m_Errors(5).errNumber, Me.Name, m_Errors(5).errDescrption
+            Err.Raise vbObjectError + m_Errors(5).errNumber, Me.name, m_Errors(5).errDescrption
          Else
             'handle thread safety
             CheckLockStatus
@@ -1189,7 +1235,7 @@ Private Sub ItemSet(ByVal Position As Long, ByVal index As String, Value As Vari
                 'Set the new value of the item
                 ItemWrite Value, iCol, Position
                 'Update the index
-                IndexItemUpdate CStr(vValueOld), CStr(Value), iCol, Position
+                IndexItemUpdateValue CStr(vValueOld), CStr(Value), iCol, Position
              Else
                 ' Set the value of the item
                 ItemWrite Value, iCol, Position
@@ -1247,7 +1293,7 @@ Public Sub RecordAddOld(ByVal aRecord As Variant)
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
             ReleaseLock
-            Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
+            Err.Raise vbObjectError + 515, Me.name, "The no of items in the input record does not match the number of columns in the data table!"
                 
         End If
         
@@ -1280,8 +1326,7 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
             iColOffset = -1
         End If
  
-        'If lNoOfCols = UBound(m_List, 1) Then
-        'new version, accepting input ranges with less or equal number of elements, assuming emtry 'trail columns'
+        'new version, accepting input ranges with less or equal number of elements, assuming emtry 'tail columns'
         If lNoOfCols <= UBound(m_List, 1) Then
             'handle thread safety
             CheckLockStatus
@@ -1295,9 +1340,6 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
 
             'add the record to the list -> can't use RecordWrite as ParamArray
             'does not work as input to other procedure
-            'For iCol = 1 To m_NumCols
-            '        m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
-            'Next iCol
             If m_EnableObjects Then
                 'add the record to the list
                 'For iCol = 1 To m_NumCols
@@ -1311,8 +1353,7 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
                 Next iCol
              Else
                 'add the record to the list
-                'For iCol = 1 To m_NumCols
-                'new version, accepting input ranges with less or equal number of elements, assuming emtry 'trail columns'
+                'new version, accepting input ranges with less or equal number of elements, assuming emtry 'tail columns'
                 For iCol = 1 To lNoOfCols
                         m_List(iCol, m_NumItems) = Record(iCol + iColOffset)
                 Next iCol
@@ -1340,7 +1381,7 @@ Public Sub RecordAdd(ParamArray Record() As Variant)
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
             ReleaseLock
-            Err.Raise vbObjectError + 515, Me.Name, "The no of items in the input record does not match the number of columns in the data table!"
+            Err.Raise vbObjectError + 515, Me.name, "The no of items in the input record does not match the number of columns in the data table!"
                 
         End If
         
@@ -1359,6 +1400,17 @@ Public Sub RecordRemove(ByVal Position As Long)
     LockForUpdate
 
 
+    'update index if table is indexed
+    If m_IsIndexed Then
+        For iCol = 1 To m_NumCols
+            'update index if column is indexed
+            If m_Columns(iCol).IsIndexed = True Then
+                IndexItemRemove CStr(m_List(iCol, Position)), iCol, Position
+            End If
+        Next iCol
+    End If
+
+
     '*** this approach is too slow if the table has a lot of columns ****
     ' set the record to Null
     For iCol = 1 To m_NumCols
@@ -1367,6 +1419,7 @@ Public Sub RecordRemove(ByVal Position As Long)
 
 '    'mark the 1st element of the record as deleted (faster approach)
 '    m_List(1, position) = "#DELETED"
+        
         
     'increase the garbage counter
     m_GarbageCount = m_GarbageCount + 1
@@ -1454,7 +1507,7 @@ Public Sub ColumnsAdd(ParamArray NewColumns() As Variant)
         iColCount = m_NumCols + iColsNew
         ReDim Preserve m_Columns(1 To iColCount)
         For iCol = m_NumCols + 1 To iColCount
-                m_Columns(iCol).Name = NewCols(iCol - (m_NumCols + iOffset))
+                m_Columns(iCol).name = NewCols(iCol - (m_NumCols + iOffset))
                 m_Columns(iCol).Number = iCol
                 m_Columns(iCol).IsSorted = False
                 m_Columns(iCol).IsIndexed = False
@@ -1545,6 +1598,8 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
         Dim iCols As Long: iCols = InputTable.Columns.Count
         Dim iRows As Long: iRows = InputTable.Rows.Count
         
+        Dim stHeader As String
+        
         Dim ListTemp() As Variant
         Dim ptrList As LongPtr
         Dim ptrListTransposed As LongPtr
@@ -1562,11 +1617,26 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
         
         
         If m_NumItems > 0 Then
+                ' release the lock and
                 ' raise error -> only allowed with empty list
                 ' The range 513-65535 is available for user errors.
                 ' For class errors, you add vbObjectError to the error number.
-                Err.Raise vbObjectError + 513, Me.Name, "List is not empty. Range can only be added to empty list!"
+                ReleaseLock
+                Err.Raise vbObjectError + 513, Me.name, "List is not empty. Range can only be added to empty list!"
         End If
+        
+        'handle special case of empty table (i.e. only header list is provided)
+        If TableHasHeaders = True And iRows = 1 Then
+            'define an empty table
+            iColCount = iCols
+            For iCol = 1 To iColCount
+                stHeader = stHeader & InputTable.Cells(1, iCol).Value & ", "
+            Next iCol
+            stHeader = Left(stHeader, Len(stHeader) - 2)
+            DefineTable iCols, stHeader
+            GoTo cleanup_steps
+        End If
+
         
         'Performance Improvement: if has headers, take 1st row for header creation and then reduce range size by 1st row
         'this eliminates the need to call "CleanUpTable" (i.e. collect the garbage) at the end of the procedure
@@ -1575,7 +1645,7 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
         If TableHasHeaders = True Then
                 For iCol = 1 To iColCount
                         'm_Columns(iCol) = InputTable.Cells(1, (iColStart - 1) + iCol).value
-                        m_Columns(iCol).Name = InputTable.Cells(1, iCol).Value
+                        m_Columns(iCol).name = InputTable.Cells(1, iCol).Value
                         m_Columns(iCol).Number = iCol
                         m_Columns(iCol).IsSorted = False
                         m_Columns(iCol).IsIndexed = False
@@ -1584,7 +1654,7 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
                 Set InputTable = InputTable.Offset(1, 0).Resize(iRows - 1, iCols)
         Else
                 For iCol = 1 To iColCount
-                        m_Columns(iCol).Name = "Field" & iCol
+                        m_Columns(iCol).name = "Field" & iCol
                         m_Columns(iCol).Number = iCol
                         m_Columns(iCol).IsSorted = False
                         m_Columns(iCol).IsIndexed = False
@@ -1625,6 +1695,7 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
         'clean pointer of temp list to avoid crash on extiting the programm
         Call CopyMemory(ByVal ptrListTemp, 0&, PTR_LENGTH)
 
+cleanup_steps:
         
         'Performance Improvement: rather than run 'CleanUpTable' to get rid of the deleted 1st row and to transpose the table,
         'set the m_IsDirty flag manually (no need to transpose as earlier on the two arrays have been swapped anyway)
@@ -1697,7 +1768,7 @@ Private Sub LoadDelimTextFileMemCpy(filename As String, Optional FieldDelimiter 
             'raise error -> only allowed with empty list
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
-            Err.Raise vbObjectError + 513, Me.Name, "List is not empty. Range can only be added to empty list!"
+            Err.Raise vbObjectError + 513, Me.name, "List is not empty. Range can only be added to empty list!"
      Else
         
         'handle thread safety
@@ -1739,7 +1810,7 @@ Private Sub LoadDelimTextFileMemCpy(filename As String, Optional FieldDelimiter 
         If TableHasHeaders = True Then
             'Debug.Print "Row " & (iCellIdx \ lngCols), "Column " & (iCellIdx Mod lngCols), "Data: " & stCells(iCellIdx)
             For iCol = 1 To iColCount
-                    m_Columns(iCol).Name = stCells(iCol - 1)
+                    m_Columns(iCol).name = stCells(iCol - 1)
                     m_Columns(iCol).Number = iCol
                     m_Columns(iCol).IsSorted = False
                     m_Columns(iCol).IsIndexed = False
@@ -1748,7 +1819,7 @@ Private Sub LoadDelimTextFileMemCpy(filename As String, Optional FieldDelimiter 
             iFirstCell = iCol - 1
         Else
             For iCol = 1 To iColCount
-                    m_Columns(iCol).Name = "Field" & iCol
+                    m_Columns(iCol).name = "Field" & iCol
                     m_Columns(iCol).Number = iCol
                     m_Columns(iCol).IsSorted = False
                     m_Columns(iCol).IsIndexed = False
@@ -1806,7 +1877,7 @@ Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter
             'raise error -> only allowed with empty list
             ' The range 513-65535 is available for user errors.
             ' For class errors, you add vbObjectError to the error number.
-            Err.Raise vbObjectError + 513, Me.Name, "List is not empty. Range can only be added to empty list!"
+            Err.Raise vbObjectError + 513, Me.name, "List is not empty. Range can only be added to empty list!"
      Else
         
         'handle thread safety
@@ -1851,7 +1922,7 @@ Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter
             
         If TableHasHeaders = True Then
             For iCol = 1 To iColCount
-                    m_Columns(iCol).Name = aRetSingleRow(iCol)
+                    m_Columns(iCol).name = aRetSingleRow(iCol)
                     m_Columns(iCol).Number = iCol
                     m_Columns(iCol).IsSorted = False
                     m_Columns(iCol).IsIndexed = False
@@ -1859,7 +1930,7 @@ Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter
             Next iCol
         Else
             For iCol = 1 To iColCount
-                    m_Columns(iCol).Name = "Field" & iCol
+                    m_Columns(iCol).name = "Field" & iCol
                     m_Columns(iCol).Number = iCol
                     m_Columns(iCol).IsSorted = False
                     m_Columns(iCol).IsIndexed = False
@@ -1880,7 +1951,7 @@ Private Sub LoadDelimTextFileByteArr(filename As String, Optional FieldDelimiter
                  Else
                     'raise an error as we can't append columns on the fly
                     'For class errors, you add vbObjectError to the error number.
-                    Err.Raise vbObjectError + m_Errors(11).errNumber, Me.Name, m_Errors(11).errDescrption
+                    Err.Raise vbObjectError + m_Errors(11).errNumber, Me.name, m_Errors(11).errDescrption
                 End If
                 For iCol = 1 To iColCount
                     m_List(iCol, iRow - 1) = aRetSingleRow(iCol)
@@ -2071,23 +2142,40 @@ Private Sub CollectGarbage()
         ' If 1st field in the record is not garbage,
         ' move the record to its new location and
         If Not m_List(1, i) = "#DELETED" Then
+            
             'Debug.Print "moving record from "; i; " to record "; good
-            For iCol = 1 To m_NumCols
-                m_List(iCol, good) = m_List(iCol, i)
-            Next iCol
+            'For iCol = 1 To m_NumCols
+            '    m_List(iCol, good) = m_List(iCol, i)
+            'Next iCol
+            DataRowMove m_List, i, good
+            
             ' if the record is the bookmark, set bookmark to new location
             If i = iBookmark Then
                 'Debug.Print "moving bookmark from "; i; " to record "; good
                 iBookmark = good
             End If
+            
+            'if the table is indexed, update the index with the new position of the item
+            If m_IsIndexed Then
+                For iCol = 1 To m_NumCols
+                    'update index if column is indexed
+                    If m_Columns(iCol).IsIndexed = True Then
+                        IndexItemUpdatePosition CStr(m_List(iCol, good)), iCol, i, good
+                    End If
+                Next iCol
+            End If
+            
             good = good + 1
+            
          Else
+            
             ' if the record is the bookmark, set bookmark to the last good location
             ' (i.e. good - 1 due to trail increment of good when shifting items)
             If i = iBookmark Then
                 'Debug.Print "moving bookmark from "; i; " to record "; good - 1
                 iBookmark = good - 1
             End If
+            
         End If
         
     Next i
@@ -2170,7 +2258,7 @@ Private Sub CheckLockStatus()
         Next iWait
         'raise error as the table is still locked for update
         'For class errors, you add vbObjectError to the error number.
-        Err.Raise vbObjectError + m_Errors(9).errNumber, Me.Name, m_Errors(9).errDescrption
+        Err.Raise vbObjectError + m_Errors(9).errNumber, Me.name, m_Errors(9).errDescrption
     End If
         
 End Sub
@@ -2307,7 +2395,7 @@ Public Sub RsFindNext(index As Variant, match As MatchType, Criteria As Variant)
     If m_Columns(iCol).IsIndexed = True Then
         If m_Columns(iCol).index.IndexType = UniqueIndex Then
             'raise error
-            Err.Raise vbObjectError + m_Errors(12).errNumber, Me.Name, m_Errors(12).errDescrption
+            Err.Raise vbObjectError + m_Errors(12).errNumber, Me.name, m_Errors(12).errDescrption
         End If
     End If
 
@@ -2347,17 +2435,17 @@ Private Sub RsFind(index As Variant, match As MatchType, Criteria As Variant)
         m_EOF = True
     End If
     
-    'Â§Â§Â§
-    'Â§Â§Â§ CONSTRUCTION SITE!! NEED TO FIGURE OUT HOW TO RESOLVE THE CRITERIA INTO A EXECUTABLE SEARCH!! Â§Â§Â§
-    'Â§Â§Â§ TEMPORARY SOLUTION IS TO USE LINEAR SEARCH ON ONE COLUMN ONLY... Â§Â§Â§
-    'Â§Â§Â§
+    '§§§
+    '§§§ CONSTRUCTION SITE!! NEED TO FIGURE OUT HOW TO RESOLVE THE CRITERIA INTO A EXECUTABLE SEARCH!! §§§
+    '§§§ TEMPORARY SOLUTION IS TO USE LINEAR SEARCH ON ONE COLUMN ONLY... §§§
+    '§§§
     
 '    For iIdx = lPointer To m_NumItems
 '    Next iIdx
 
-    'Â§Â§Â§
-    'Â§Â§Â§ END OF CONSTRUCTION SITE
-    'Â§Â§Â§
+    '§§§
+    '§§§ END OF CONSTRUCTION SITE
+    '§§§
 
 
 End Sub
@@ -2395,7 +2483,7 @@ Private Function SelectData(FieldList As String, WhereClause As String, Optional
     Set tOut = New cDataTable
     Set htKeys = New cHashTable
 
-    '§§§ Future feature §§§
+    '��� Future feature ���
     
     '0. Parse field list
     '1. Define Output data table structure based on field List
@@ -2623,7 +2711,7 @@ On Error GoTo err_DumpToRange
         If CompressOnRowOverflow = False Then
             'raise error as we cannot write the output to the target
             'For class errors, you add vbObjectError to the error number.
-            Err.Raise vbObjectError + m_Errors(8).errNumber, Me.Name, m_Errors(8).errDescrption
+            Err.Raise vbObjectError + m_Errors(8).errNumber, Me.name, m_Errors(8).errDescrption
          Else
             'write the output in a compressed manner
             WriteToCells TargetWorksheet, TargetCell, IncludeHeader, CompressOnRowOverflow
@@ -2633,7 +2721,7 @@ On Error GoTo err_DumpToRange
     
     If IncludeHeader = True Then
         For iColIdx = 1 To m_NumCols
-            TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
+            TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).name
         Next iColIdx
         
         'check that table has some records to dump
@@ -2657,10 +2745,17 @@ exit_DumpToRange:
     Exit Sub
     
 err_DumpToRange:
-    If Err.Number = 1004 Then
+    If Err.Number = 1004 Or Err.Number = 7 Then
         'let's try to resolve the issue by writing single values to single cells
         WriteToCells TargetWorksheet, TargetCell, IncludeHeader, CompressOnRowOverflow
         Resume exit_DumpToRange
+     Else
+        Dim lErr As Long
+        Dim sErr As String
+        lErr = Err.Number
+        sErr = Err.Description
+        Err.Clear
+        Err.Raise vbObjectError + m_Errors(14).errNumber, Me.name, m_Errors(14).errDescrption & lErr & ": " & sErr
     End If
 
 
@@ -2713,7 +2808,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
         If CompressOnRowOverflow = False Then
             'raise error as we cannot write the output to the target
             'For class errors, you add vbObjectError to the error number.
-            Err.Raise vbObjectError + m_Errors(8).errNumber, Me.Name, m_Errors(8).errDescrption
+            Err.Raise vbObjectError + m_Errors(8).errNumber, Me.name, m_Errors(8).errDescrption
          Else
             
             'initialize the cell size array
@@ -2724,7 +2819,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             
             If IncludeHeader = True Then
                 For iColIdx = 1 To m_NumCols
-                    TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
+                    TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).name
                 Next iColIdx
                 
                 'increment the starting row for the output by 1 to cater for the header line
@@ -2777,7 +2872,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             
             'Output the header
             For iColIdx = 1 To m_NumCols
-                TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).Name
+                TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).name
             Next iColIdx
             
             'increment the starting row for the output by 1 to cater for the header line
@@ -2818,7 +2913,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
 '
 '        End If
 '
-'        'Â§Â§Â§ not sure this works as version with header is the same as version without header... Â§Â§Â§
+'        '§§§ not sure this works as version with header is the same as version without header... §§§
 '
     End If
     
@@ -2855,7 +2950,7 @@ Public Sub DumpToFile(TargetFile As String, Delimiter As String, Optional TextQu
      ElseIf OutputMode = ErrorIfExists Then
         'check if file exists
         If Dir(TargetFile) <> "" Then
-            Err.Raise vbObjectError + m_Errors(6).errNumber, Me.Name, m_Errors(6).errDescrption
+            Err.Raise vbObjectError + m_Errors(6).errNumber, Me.name, m_Errors(6).errDescrption
         End If
      Else
         Open TargetFile For Output As #fn
@@ -2943,12 +3038,12 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                 If Not IsTableColumn(SortOrder(i + 1)) Then
                     If UCase(SortOrder(i + 1)) = "ASC" Then
                         ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                        Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))              'Â§Â§Â§ changed to 2nd dimension
+                        Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))              '§§§ changed to 2nd dimension
                         'm_SortedColumn = iColToSort
                         SetSortedColumn iColToSort
                      ElseIf UCase(SortOrder(i + 1)) = "DESC" Then
                         ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                        Call MergeSortDesc(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))          'Â§Â§Â§ changed to 2nd dimension
+                        Call MergeSortDesc(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))          '§§§ changed to 2nd dimension
                         'm_SortedColumn = iColToSort
                         SetSortedColumn iColToSort
                      Else
@@ -2957,7 +3052,7 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                     End If
                  Else
                     ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  'Â§Â§Â§ changed to 2nd dimension
+                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  '§§§ changed to 2nd dimension
                     'm_SortedColumn = iColToSort
                     SetSortedColumn iColToSort
                End If
@@ -2965,7 +3060,7 @@ Public Sub Sort(ParamArray SortOrder() As Variant)
                 'we are looking at the last parameter - only process if it is a numeric pointer to the column to sort
                 If IsTableColumn(SortOrder(i)) Then
                     ReDim aScratch(LBound(m_List) To UBound(m_List), LBound(m_List, 2) To UBound(m_List, 2))
-                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  'Â§Â§Â§ changed to 2nd dimension
+                    Call MergeSort(m_List(), iColToSort, aScratch(), LBound(m_List, 2), UBound(m_List, 2))                  '§§§ changed to 2nd dimension
                     'm_SortedColumn = iColToSort
                     SetSortedColumn iColToSort
                 End If
@@ -2995,8 +3090,8 @@ Private Sub MergeSort(List() As Variant, ColToSort As Long, Scratch() As Variant
     Dim iCols As Long
     
     'Determine the number of Columns of the list
-    Dim iColLower As Long: iColLower = LBound(List)          'Â§Â§Â§ changed to 1st dimension
-    Dim iColUpper As Long: iColUpper = UBound(List)          'Â§Â§Â§ changed to 1st dimension
+    Dim iColLower As Long: iColLower = LBound(List)          '§§§ changed to 1st dimension
+    Dim iColUpper As Long: iColUpper = UBound(List)          '§§§ changed to 1st dimension
     
 
     ' If the list has no more than C_CUT_OFF elements,
@@ -3254,8 +3349,10 @@ Public Sub SortUnstable(index As Variant, Optional Direction As String = "asc")
         iColToSort = GetColumnIndex(index)
         If UCase(Direction) = "ASC" Then
             Call QuickSort(m_List(), iColToSort, LBound(m_List, 2), UBound(m_List, 2))
+            SetSortedColumn iColToSort
          ElseIf UCase(Direction) = "DESC" Then
             Call QuickSortDesc(m_List(), iColToSort, LBound(m_List, 2), UBound(m_List, 2))
+            SetSortedColumn iColToSort
          Else
             MsgBox "Sort direction '" & Direction & "' not known."
             Exit Sub
@@ -3263,7 +3360,7 @@ Public Sub SortUnstable(index As Variant, Optional Direction As String = "asc")
         'Mark table as dirty, as we have changed the order of the items
         m_IsDirty = True
      Else
-        MsgBox "Sort Column '" & index & "' does not exist in table '" & Me.Name & "'"
+        MsgBox "Sort Column '" & index & "' does not exist in table '" & Me.name & "'"
         Exit Sub
     End If
     
@@ -3392,7 +3489,7 @@ Private Function Search(SearchFor As Variant, match As MatchType, index As Strin
 ' ************************************************
 ' Function to search the list, currently supporting:
 ' full table search, binary search on sorted column, indexed search on uniquely indexed columns
-' Â§Â§Â§ Future usage considering non unique indices and data types Â§Â§Â§
+' §§§ Future usage considering non unique indices and data types §§§
 ' ************************************************
 
     Dim lPointer As Long
@@ -3490,7 +3587,7 @@ Private Function IndexedSearch(SearchFor As Variant, match As MatchType, index A
             
      ElseIf m_Columns(iCol).index.IndexType = NonUniqueIndex Then
         'we have a non-unique index - let's traverse the index
-        '§§§ to be implemented - for the time being let's use linear search §§§
+        '��� to be implemented - for the time being let's use linear search ���
         lPointer = LinearSearch(SearchFor, match, index, Start)
         
      Else
@@ -3535,7 +3632,7 @@ Private Function LinearSearch(SearchFor As Variant, match As MatchType, index As
     
 End Function
 
-Function BinarySearch(SearchFor As Variant, index As String) As Long
+Private Function BinarySearch(SearchFor As Variant, index As String) As Long
 'Optional LastEl As Variant
 ' ************************************************
 ' Locate the item using generic binary search.
@@ -3681,7 +3778,7 @@ Private Sub TransposeMemCpy()
     
     'mTimer.Reset
     
-    '§§§ Performance Improvment: This might be faster by using CopyMemory at a later stage §§§
+    '��� Performance Improvment: This might be faster by using CopyMemory at a later stage ���
     'copy the data from m_List to m_ListTransposed
     m_ListTransposed = m_List
     'Debug.Print "HP Copying m_List to m_ListTransposed took: " & mTimer.MillisecondsElapsed & " milliseconds..."
@@ -3952,7 +4049,7 @@ Private Function GetColumnIndex(ByVal index As String) As Long
      Else
         'Find the column index based on the field name
         For iCol = 1 To m_NumCols
-            If m_Columns(iCol).Name = index Then
+            If m_Columns(iCol).name = index Then
                     GetColumnIndex = iCol
                     Exit For
             End If
@@ -3966,16 +4063,16 @@ Private Function GetColumnName(ByVal index As Long) As String
 ' Get the column name of a given index
 ' ***********************************************
 
-    GetColumnName = m_Columns(index).Name
+    GetColumnName = m_Columns(index).name
 
 End Function
 
-Private Sub SetColumnName(ByVal index As Long, ByVal Name As String)
+Private Sub SetColumnName(ByVal index As Long, ByVal name As String)
 ' ***********************************************
 ' Set the column name of a given index
 ' ***********************************************
 
-    m_Columns(index).Name = Name
+    m_Columns(index).name = name
 
 End Sub
 
@@ -4198,7 +4295,7 @@ Private Function GetVarType(myVar) As String
 ' Written By Shanmuga Sundara Raman for http://vbadud.blogspot.com
 ' ---------------------------------------------------------------
 
-'Â§Â§Â§ kept here for the sake of having all data types in one place, maybe used at a later stage Â§Â§Â§
+'§§§ kept here for the sake of having all data types in one place, maybe used at a later stage §§§
 
     If VarType(myVar) = vbNull Then
         GetVarType = "Null (no valid data) "
