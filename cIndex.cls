@@ -123,7 +123,8 @@ Public Property Get Version() As String
 ' Version string of the current class.
 ' Contains a list of (historical) changes to the class within the comments of the procedure.
 ' ************************************************
-   Version = "Version 1.0 (03/2017)"
+   'Version = "Version 1.0 (03/2017)"
+   Version = "Version 1.1 (10/2021)"    'Added method to update the position of an item, to enable garbage collection
 
 End Property
 
@@ -140,11 +141,11 @@ Public Property Get ClassName() As String
 ' Returns the name of the class.
 ' ***********************************************
     
-    Name = C_Name
+    name = C_Name
     
 End Property
 
-Public Property Let Name(Value As String)
+Public Property Let name(Value As String)
 ' ***********************************************
 ' Sets the name of the Index.
 ' ***********************************************
@@ -154,12 +155,12 @@ Public Property Let Name(Value As String)
 End Property
 
 
-Public Property Get Name() As String
+Public Property Get name() As String
 ' ***********************************************
 ' Returns the name of the index.
 ' ***********************************************
 
-    Name = m_Name
+    name = m_Name
     
 End Property
 
@@ -198,7 +199,7 @@ Public Sub Create(ByRef DataTable As cDataTable, Column As String)
             Do While Not DataTable.RsEOF
                 stValue = DataTable.Item(Column)
                 If m_IndexUnique.Exists(stValue) Then
-                    Err.Raise vbObjectError + 514, Me.Name, "Value '" & DataTable.Item(Column) & "' is not unique! Failed to create unique index."
+                    Err.Raise vbObjectError + 514, Me.name, "Value '" & DataTable.Item(Column) & "' is not unique! Failed to create unique index."
                  Else
                     m_IndexUnique.Add stValue, DataTable.RsBookmark
                 End If
@@ -207,7 +208,7 @@ Public Sub Create(ByRef DataTable As cDataTable, Column As String)
          ElseIf m_IndexType = NonUniqueIndex Then
             '§§§ to be implemented §§§
          Else
-            Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
+            Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
         End If
 
 End Sub
@@ -219,14 +220,14 @@ Public Sub ItemAdd(Value As String, Position As Long)
 
     If m_IndexType = UniqueIndex Then
         If m_IndexUnique.Exists(Value) Then
-            Err.Raise vbObjectError + 514, Me.Name, "Value '" & Value & "' is not unique! Failed to update unique index."
+            Err.Raise vbObjectError + 514, Me.name, "Value '" & Value & "' is not unique! Failed to update unique index."
          Else
             m_IndexUnique.Add Value, Position
         End If
      ElseIf m_IndexType = NonUniqueIndex Then
         '§§§ to be implemented §§§
      Else
-        Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
+        Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
     End If
 
 
@@ -242,26 +243,26 @@ Public Sub ItemRemove(Value As String, Position As Long)
         If m_IndexUnique.Exists(Value) Then
             m_IndexUnique.Remove Value
          Else
-            Err.Raise vbObjectError + 514, Me.Name, "Value '" & Value & "' not found in index! Failed to delete from index."
+            Err.Raise vbObjectError + 514, Me.name, "Value '" & Value & "' not found in index! Failed to delete from index."
         End If
      ElseIf m_IndexType = NonUniqueIndex Then
         '§§§ to be implemented §§§
      Else
-        Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
+        Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
     End If
 
 
 
 End Sub
 
-Public Sub ItemUpdate(ValueOld As String, ValueNew As String, Position As Long)
+Public Sub ItemUpdateValue(ValueOld As String, ValueNew As String, Position As Long)
 ' ***********************************************
 ' Update a single item in the index.
 ' ***********************************************
 
     If m_IndexType = UniqueIndex Then
         If m_IndexUnique.Exists(ValueNew) Then
-            Err.Raise vbObjectError + 514, Me.Name, "Value '" & ValueNew & "' is not unique! Failed to update unique index."
+            Err.Raise vbObjectError + 514, Me.name, "Value '" & ValueNew & "' is not unique! Failed to update unique index."
          Else
             m_IndexUnique.Remove ValueOld
             m_IndexUnique.Add ValueNew, Position
@@ -269,12 +270,27 @@ Public Sub ItemUpdate(ValueOld As String, ValueNew As String, Position As Long)
      ElseIf m_IndexType = NonUniqueIndex Then
         '§§§ to be implemented §§§
      Else
-        Err.Raise vbObjectError + 513, Me.Name, "Can not create index without a defined index type!"
+        Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
     End If
 
 
 End Sub
 
+Public Sub ItemUpdatePosition(Value As String, PositionOld As Long, PositionNew As Long)
+' ***********************************************
+' Update a single item in the index.
+' ***********************************************
+
+    If m_IndexType = UniqueIndex Then
+        m_IndexUnique.Item(Value) = PositionNew
+     ElseIf m_IndexType = NonUniqueIndex Then
+        '§§§ to be implemented §§§
+     Else
+        Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
+    End If
+
+
+End Sub
 
 Public Function GetNextItem(SearchFor As Variant, match As Long, Optional Start As Long = 1) As Long
 ' ***********************************************

@@ -161,11 +161,11 @@ Public Property Get About() As String
     About = About & "For additional details please contact the author."
 End Property
 
-Public Property Get Name() As String
+Public Property Get name() As String
 ' ***********************************************
 ' Returns the name of the class.
 ' ***********************************************
-    Name = C_Name
+    name = C_Name
 End Property
 
 
@@ -505,19 +505,19 @@ End Function
 
 ' assign a key and value to a given slot
 
-Private Sub PrepareSlot(ByVal Index As Long, ByVal Key As String, _
+Private Sub PrepareSlot(ByVal index As Long, ByVal Key As String, _
     ByVal HCode As Long, ByVal LastNdx As Long)
     ' assign the key
     ' keep case-sensitiveness into account
     If m_IgnoreCase Then Key = UCase$(Key)
-    slotTable(Index).Key = Key
+    slotTable(index).Key = Key
     
     If LastNdx Then
         ' this is the successor of another slot
-        slotTable(LastNdx).nextItem = Index
+        slotTable(LastNdx).nextItem = index
     Else
         ' this is the first slot for a given hash code
-        hashTbl(HCode) = Index
+        hashTbl(HCode) = index
     End If
 End Sub
 
