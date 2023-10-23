@@ -344,8 +344,9 @@ Public Property Get Version() As String
     'Version = "Version 1.2.7.2 (04/2022)"  'Bug fix: use move row instead of manual loop in CollectGarbage
     'Version = "Version 1.2.8.0 (07/2022)"  'Enhanced LoadRange to create empty table if only header is provided
                                             'Added property "ItemIndex" which returns the numeric index of a named Item
-   Version = "Version 1.2.8.1 (09/2022)"    'Bugfix in LoadRange when empty table if only header is provided
+    'Version = "Version 1.2.8.1 (09/2022)"  'Bugfix in LoadRange when empty table if only header is provided
                                             'Bugfix in DumpToRange error handling to avaid silent errors
+    Version = "Version 1.2.8.2 (10/2023)"   'Added new feature to consider filters in LoadRange
    
 
 End Property
@@ -1582,7 +1583,7 @@ End Sub
 
 #If C_CON_OFFICE_APP = "XLS" Then
 
-Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean)
+Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean, Optional ConsiderFilters As Boolean = False)
 ' ***********************************************
 ' Add a cell range to the empty table
 ' ***********************************************
@@ -1722,6 +1723,21 @@ cleanup_steps:
         'handle thread safety
         ReleaseLock
         
+        'if required - remove filtered rows
+        If ConsiderFilters Then
+            Dim currRow As Range
+            Dim lRowIdx As Long: lRowIdx = 1
+
+            Me.GarbageCollection = False
+            For Each currRow In InputTable.Rows
+                If currRow.Height = 0 Then
+                    Me.RecordRemove lRowIdx
+                End If
+                lRowIdx = lRowIdx + 1
+                DoEvents
+            Next
+            Me.GarbageCollection = True
+        End If
         
 End Sub
 

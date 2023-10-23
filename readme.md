@@ -55,7 +55,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |RecordAddOld      | ByVal aRecord As Variant| Adding a record to the data table with an array containing the data as input
 |RecordAdd         | ParamArray Record() As Variant| Adding a record to the data table passing each column as argument to the method|
 |RecordRemove      | ByVal Position As Long| Delete a single record from the data table|
-|LoadRange         | InputTable As Range, TableHasHeaders As Boolean| Load an MS Excel worksheet range into an empty data table. Note: if you load a range, you do not have to define the data table before.|
+|LoadRange         | InputTable As Range, TableHasHeaders As Boolean, Optional ConsiderFilters as Boolean = False| Load an MS Excel worksheet range into an empty data table. If ConsiderFilters is set to true, Filters applied to the source range will be considerd (standard behaviour is to load all data in the range, ignoring any filter set). Note: if you load a range, you do not have to define the data table before.|
 |LoadDelimTextFile | Filename As String, Optional FieldDelimiter As String = ",", Optional RecordDelimiter As String = vbNewLine, Optional TableHasHeaders As Boolean = True, Optional TextQualifier As String = """" | Load a delimited text file into an empty data table. Note: if you load a delimited text file, you do not have to define the data table before.|
 |AppendToTable     | tSource As cDataTable, Optional tyAppend As AppendType|Append another Data-Table to this Data-Table|
 |RsMoveFirst       | --|Move the RSBookmark to the first record in the data table|
