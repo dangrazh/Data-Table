@@ -31,6 +31,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |Get        | NumCols              | (Legacy - do not use anymore) Returns a Long containing the number of columns in the data table|
 |Get / Let  | GarbageCollection    | Sets/Returns a Boolean indicating if garbage collection is active|
 |Get / Let  | ObjectStorageEnabled | Sets/Returns a Boolean indicating if object can be stored in the data table|
+|Get / Let  | PreserveNumberStoredAsText | Sets/Returns a Boolean indicating if number stored as Text should be preserved|
 |Get        | TableSummary         | Returns a String containing a summary of the data table including as name, no of records, no of columns|
 |Get        | SADescrPtr           | Returns a LongPtr to the Safe Array Description of the data table|
 |Get        | SAStructPtr          | Returns a LongPtr to the Safe Array Structure of the data table|

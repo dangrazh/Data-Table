@@ -223,6 +223,7 @@ Private m_FirstGarbage As Long                  ' The index of the 1st record co
 Private m_LastGarbage As Long                   ' The index of the last record containing garbage
 Private m_CollectGarbage As Boolean             ' Flag to determine if we should collect garbage
 Private m_EnableObjects As Boolean              ' Flag to determine if we allow objects to be stored
+Private m_PreserveNumberStoredAsText As Boolean ' Flag to determine if numbers stored as text should be preserved in this form
 Private m_Columns() As DataColumn               ' Array containing the data columns
 Private m_SearchLastItem As Variant             ' The last item that was searched
 Private m_SearchLastColumn As Long              ' Contains the column index of the column last searched
@@ -261,6 +262,8 @@ Private Sub Class_Initialize()
     m_HasHeaders = False
     m_IsDirty = False
     m_CollectGarbage = True
+    m_EnableObjects = False
+    m_PreserveNumberStoredAsText = False
     m_EOF = False
     m_BOF = False
     m_IsLocked = False
@@ -346,7 +349,8 @@ Public Property Get Version() As String
                                             'Added property "ItemIndex" which returns the numeric index of a named Item
     'Version = "Version 1.2.8.1 (09/2022)"  'Bugfix in LoadRange when empty table if only header is provided
                                             'Bugfix in DumpToRange error handling to avaid silent errors
-    Version = "Version 1.2.8.2 (10/2023)"   'Added new feature to consider filters in LoadRange
+    'Version = "Version 1.2.8.2 (10/2023)"  'Added new feature to consider filters in LoadRange
+    Version = "Version 1.2.9.0 (10/2024)"   'Added new feature to clone (i.e. create a deep copy of) the data table
    
 
 End Property
@@ -377,12 +381,12 @@ Public Property Get name() As String
     
 End Property
 
-Public Property Let name(Value As String)
+Public Property Let name(value As String)
 ' ***********************************************
 ' Sets the name of the data table.
 ' ***********************************************
 
-    m_Name = Value
+    m_Name = value
 
 End Property
 
@@ -501,12 +505,12 @@ Public Property Get GarbageCollection() As Boolean
 
 End Property
 
-Public Property Let GarbageCollection(Value As Boolean)
+Public Property Let GarbageCollection(value As Boolean)
 ' ***********************************************
 ' Sets the CollectGarbage state of the class.
 ' ***********************************************
     
-    If Value = False Then
+    If value = False Then
         'Set the state to false
         m_CollectGarbage = False
      Else
@@ -531,14 +535,33 @@ Public Property Get ObjectStorageEnabled() As Boolean
 End Property
 
 
-Public Property Let ObjectStorageEnabled(Value As Boolean)
+Public Property Let ObjectStorageEnabled(value As Boolean)
 ' ***********************************************
 ' Sets the ObjectStorageEnabled state of the class.
 ' ***********************************************
 
-    m_EnableObjects = Value
+    m_EnableObjects = value
 
 End Property
+
+Public Property Get PreserveNumberStoredAsText() As Boolean
+' ***********************************************
+' Returns the PreserveNumberStoredAsText state of the class.
+' ***********************************************
+
+    PreserveNumberStoredAsText = m_PreserveNumberStoredAsText
+
+End Property
+
+Public Property Let PreserveNumberStoredAsText(value As Boolean)
+' ***********************************************
+' Sets the PreserveNumberStoredAsText state of the class.
+' ***********************************************
+
+    m_PreserveNumberStoredAsText = value
+
+End Property
+
 
 Public Property Get TableSummary() As String
 ' ***********************************************
@@ -609,16 +632,16 @@ Public Property Get RsBookmark() As Long
 
 End Property
 
-Public Property Let RsBookmark(Value As Long)
+Public Property Let RsBookmark(value As Long)
 ' ***********************************************
 ' Set the pointer of the current record within the recordset
 ' to a specific position
 ' ***********************************************
 
-    If Value > m_NumItems Then
+    If value > m_NumItems Then
         m_EOF = True
      Else
-        m_Bookmark = Value
+        m_Bookmark = value
     End If
 
 End Property
@@ -634,12 +657,12 @@ Public Property Get ItemName(index As Long) As String
 End Property
 
 
-Public Property Let ItemName(index As Long, Value As String)
+Public Property Let ItemName(index As Long, value As String)
 ' ***********************************************
 ' Set the name of the Item (Column Header)
 ' ***********************************************
 
-    SetColumnName index, Value
+    SetColumnName index, value
     
 End Property
 
@@ -726,7 +749,7 @@ Public Property Get Item(index As Variant, Optional Row As Long = -1) As Variant
 End Property
 
 
-Public Property Let Item(index As Variant, Optional Row As Long = -1, Value As Variant)
+Public Property Let Item(index As Variant, Optional Row As Long = -1, value As Variant)
 ' ***********************************************
 ' Set the value of a given item at position / index
 ' ***********************************************
@@ -739,10 +762,10 @@ Public Property Let Item(index As Variant, Optional Row As Long = -1, Value As V
         Err.Raise vbObjectError + m_Errors(6).errNumber, Me.name, m_Errors(6).errDescrption
      ElseIf Row > -1 Then
         'user provided a position, use this one
-            Call ItemSet(Row, CStr(index), Value)
+            Call ItemSet(Row, CStr(index), value)
      ElseIf m_Bookmark > -1 Then
         'we have a valid bookmark so let's use this
-        Call ItemSet(m_Bookmark, CStr(index), Value)
+        Call ItemSet(m_Bookmark, CStr(index), value)
      Else
         MsgBox "Unhandled condition in Property Let 'Item'", vbCritical
         Exit Property
@@ -939,7 +962,26 @@ Public Sub DefineTable(NoOfColumns As Long, Optional ColumnHeaders As String = "
         
 End Sub
 
+
+Public Function Clone() As cDataTable
+' ***********************************************
+' Create a deep copy of the data table
+' ***********************************************
+
+    Dim tOut As cDataTable
+    
+    Set tOut = Me.CreateEmptyCopy
+    tOut.AppendToTable Me
+
+    Set Clone = tOut
+
+End Function
+
+
 Public Function CreateEmptyCopy() As cDataTable
+' ***********************************************
+' Create an empty copy of the data table
+' ***********************************************
 
     Dim tOut As cDataTable
 
@@ -1200,7 +1242,7 @@ Private Function ItemGet(ByVal Position As Long, ByVal index As String) As Varia
         
 End Function
 
-Private Sub ItemSet(ByVal Position As Long, ByVal index As String, Value As Variant)
+Private Sub ItemSet(ByVal Position As Long, ByVal index As String, value As Variant)
 ' ***********************************************
 ' Set the value of an item in the list by position.
 ' ***********************************************
@@ -1234,12 +1276,12 @@ Private Sub ItemSet(ByVal Position As Long, ByVal index As String, Value As Vari
                 'Get the old item value
                 ItemRead vValueOld, iCol, Position
                 'Set the new value of the item
-                ItemWrite Value, iCol, Position
+                ItemWrite value, iCol, Position
                 'Update the index
-                IndexItemUpdateValue CStr(vValueOld), CStr(Value), iCol, Position
+                IndexItemUpdateValue CStr(vValueOld), CStr(value), iCol, Position
              Else
                 ' Set the value of the item
-                ItemWrite Value, iCol, Position
+                ItemWrite value, iCol, Position
             End If
             
             'handle thread safety
@@ -1631,7 +1673,7 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean, Opti
             'define an empty table
             iColCount = iCols
             For iCol = 1 To iColCount
-                stHeader = stHeader & InputTable.Cells(1, iCol).Value & ", "
+                stHeader = stHeader & InputTable.Cells(1, iCol).value & ", "
             Next iCol
             stHeader = Left(stHeader, Len(stHeader) - 2)
             DefineTable iCols, stHeader
@@ -1646,7 +1688,7 @@ Public Sub LoadRange(ByVal InputTable As Range, TableHasHeaders As Boolean, Opti
         If TableHasHeaders = True Then
                 For iCol = 1 To iColCount
                         'm_Columns(iCol) = InputTable.Cells(1, (iColStart - 1) + iCol).value
-                        m_Columns(iCol).name = InputTable.Cells(1, iCol).Value
+                        m_Columns(iCol).name = InputTable.Cells(1, iCol).value
                         m_Columns(iCol).Number = iCol
                         m_Columns(iCol).IsSorted = False
                         m_Columns(iCol).IsIndexed = False
@@ -2731,19 +2773,28 @@ On Error GoTo err_DumpToRange
          Else
             'write the output in a compressed manner
             WriteToCells TargetWorksheet, TargetCell, IncludeHeader, CompressOnRowOverflow
+            Exit Sub
         End If
+    End If
+        
+    'check if PreserveNumberStoredAsText is enabled, if yes, call WriteToCells rather than using
+    'the standard way to output the data
+    If m_PreserveNumberStoredAsText = True Then
+            'write the output in a compressed manner
+            WriteToCells TargetWorksheet, TargetCell, IncludeHeader, CompressOnRowOverflow
+            Exit Sub
     End If
         
     
     If IncludeHeader = True Then
         For iColIdx = 1 To m_NumCols
-            TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).name
+            TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).value = m_Columns(iColIdx).name
         Next iColIdx
         
         'check that table has some records to dump
         If m_NumItems = 0 Then
             'write message that table is empty in top left cell of output area
-            TargetWorksheet.Cells(iRow + 1, iCol).Value = "Empty Data Table"
+            TargetWorksheet.Cells(iRow + 1, iCol).value = "Empty Data Table"
          Else
             TargetWorksheet.Cells(iRow + 1, iCol).Resize(UBound(m_ListTransposed), UBound(m_ListTransposed, 2)) = m_ListTransposed
         End If
@@ -2751,7 +2802,7 @@ On Error GoTo err_DumpToRange
         'check that table has some records to dump
         If m_NumItems = 0 Then
             'write message that table is empty in top left cell of output area
-            TargetWorksheet.Cells(iRow, iCol).Value = "Empty Data Table"
+            TargetWorksheet.Cells(iRow, iCol).value = "Empty Data Table"
          Else
             TargetWorksheet.Cells(iRow, iCol).Resize(UBound(m_ListTransposed), UBound(m_ListTransposed, 2)) = m_ListTransposed
         End If
@@ -2835,7 +2886,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             
             If IncludeHeader = True Then
                 For iColIdx = 1 To m_NumCols
-                    TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).name
+                    TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).value = m_Columns(iColIdx).name
                 Next iColIdx
                 
                 'increment the starting row for the output by 1 to cater for the header line
@@ -2888,7 +2939,7 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
             
             'Output the header
             For iColIdx = 1 To m_NumCols
-                TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).Value = m_Columns(iColIdx).name
+                TargetWorksheet.Cells(iRow, iCol + (iColIdx - 1)).value = m_Columns(iColIdx).name
             Next iColIdx
             
             'increment the starting row for the output by 1 to cater for the header line
@@ -2900,7 +2951,12 @@ Private Sub WriteToCells(TargetWorksheet As Worksheet, TargetCell As Range, Opti
         For iRowIdx = 1 To m_NumItems
             For iColIdx = 1 To m_NumCols
                 stContent = m_ListTransposed(iRowIdx, iColIdx)
-                If InStr(stContent, vbLf) Or InStr(stContent, vbCr) Or Left$(stContent, 1) = "+" Or Left$(stContent, 1) = "-" Or Left$(stContent, 1) = "=" Then
+                If InStr(stContent, vbLf) Or _
+                    InStr(stContent, vbCr) Or _
+                    Left$(stContent, 1) = "+" Or _
+                    Left$(stContent, 1) = "-" Or _
+                    Left$(stContent, 1) = "=" Or _
+                    IsNumberStoredAsText(m_ListTransposed, iRowIdx, iColIdx) Then
                     'add a single quote at the beginning of the content to prevent err 1004 to occur
                     TargetWorksheet.Cells(iRow + (iRowIdx - 1), iCol + (iColIdx - 1)).FormulaR1C1 = "'" & m_ListTransposed(iRowIdx, iColIdx)
                  Else
@@ -4130,7 +4186,7 @@ End Sub
 '# Service Routines
 '#======================================================================================================================
 
-Private Function Compare(Value As Variant, ByVal CompareWith As Variant, Comparison As MatchType) As Boolean
+Private Function Compare(value As Variant, ByVal CompareWith As Variant, Comparison As MatchType) As Boolean
 ' ***********************************************
 ' Compares Value1 (value) with Value2 (CompareWith) and
 ' returns TRUE if specific comparison is positive
@@ -4146,28 +4202,28 @@ Private Function Compare(Value As Variant, ByVal CompareWith As Variant, Compari
     Select Case Comparison
     
         Case Equals
-            If Value = CompareWith Then Compare = True
+            If value = CompareWith Then Compare = True
         Case DoesNotEqual
-            If Value <> CompareWith Then Compare = True
+            If value <> CompareWith Then Compare = True
         Case GreaterThen
-            If Value > CompareWith Then Compare = True
+            If value > CompareWith Then Compare = True
         Case GreaterThenOrEqual
-            If Value >= CompareWith Then Compare = True
+            If value >= CompareWith Then Compare = True
         Case LessThen
-            If Value < CompareWith Then Compare = True
+            If value < CompareWith Then Compare = True
         Case LessThenOrEqual
-            If Value <= CompareWith Then Compare = True
+            If value <= CompareWith Then Compare = True
         Case MatchesPattern, DoesNotMatchPattern
-            stValue = Value
+            stValue = value
             stCompareWith = CompareWith
-            Compare = PatternComparison(Value, CompareWith, Comparison)
+            Compare = PatternComparison(value, CompareWith, Comparison)
         Case Else
             'nothing to do
     End Select
 
 End Function
 
-Private Function PatternComparison(ByVal Value As String, ByVal CompareWith As String, Comparison As MatchType) As Boolean
+Private Function PatternComparison(ByVal value As String, ByVal CompareWith As String, Comparison As MatchType) As Boolean
 ' ***********************************************
 ' Compares Value1 (value) with Value2 (CompareWith) and
 ' returns TRUE if specific comparison is positive
@@ -4202,7 +4258,7 @@ Private Function PatternComparison(ByVal Value As String, ByVal CompareWith As S
     
     'outer check - compare begins with
     If beginsWith = True Then
-       If Left$(Value, Len(aMatchWords(LBound(aMatchWords)))) = aMatchWords(LBound(aMatchWords)) Then
+       If Left$(value, Len(aMatchWords(LBound(aMatchWords)))) = aMatchWords(LBound(aMatchWords)) Then
             If Comparison = MatchesPattern Then
                 'Continue...
              Else
@@ -4224,7 +4280,7 @@ Private Function PatternComparison(ByVal Value As String, ByVal CompareWith As S
         
     'outer check - compare ends with
     If endsWith = True Then
-       If Right$(Value, Len(aMatchWords(UBound(aMatchWords)))) = aMatchWords(UBound(aMatchWords)) Then
+       If Right$(value, Len(aMatchWords(UBound(aMatchWords)))) = aMatchWords(UBound(aMatchWords)) Then
             If Comparison = MatchesPattern Then
                 'Continue...
              Else
@@ -4247,7 +4303,7 @@ Private Function PatternComparison(ByVal Value As String, ByVal CompareWith As S
     
     'main loop of single patterns
     For i = LBound(aMatchWords) To UBound(aMatchWords)
-        iMatch = InStr(iPrevMatch, Value, aMatchWords(i))
+        iMatch = InStr(iPrevMatch, value, aMatchWords(i))
         If iMatch > 0 Then
             matchWord = True
             iPrevMatch = iMatch + 1
@@ -4764,6 +4820,22 @@ Private Function ParseCSV03(ByRef Expression As String, asValues() As String, Op
     ParseCSV03 = 1
   
   End If
+
+End Function
+
+
+Private Function IsNumberStoredAsText(ByRef arr As Variant, i As Long, j As Long) As Boolean
+'*************************************************************
+' checks if a value in the passed array is a vbString and a Number at the same time
+' returns true if both conditions are met
+'*************************************************************
+
+    If VarType(arr(i, j)) = vbString And IsNumeric(arr(i, j)) Then
+        IsNumberStoredAsText = True
+    Else
+        IsNumberStoredAsText = False
+    End If
+
 
 End Function
 
