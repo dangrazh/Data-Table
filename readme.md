@@ -50,6 +50,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |DefineTable       | NoOfColumns As Long, Optional ColumnHeaders As String = "n/a", Optional NoOfRows As Long = 1| Define the structure of the table. This is the frist thing to do after creating the object, unless you load a range or a delimited file.|
 |CreateEmptyCopy       | --| Creates an empty copy of the data table including structure but without any data or indices being copied|
 |ColumnsAdd        | ParamArray NewColumns() As Variant | Add 1..n new columns to an existing Data-Table|
+|Clone             | --| Create a clone (deep copy) of the Data-Table|
 |IndexAdd          | ColumnName As String, idxType As IndexType|Add an index to the specified column|
 |IndexRemove       | ColumnName As String|Add the index from the specified column|
 |TruncateTable     | AskForConfirmation As Boolean| Truncate the table and delete all content but not the structure|
