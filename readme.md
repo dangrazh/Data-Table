@@ -2,15 +2,15 @@
 A VB class providing advanced array based data handling. Built with several features optimized for MS Excel but working as well with VB6 or any other application supporting VBA.
 
 ATTENTION: While the basic functionality is fully tested and should work without issues, some of the functionaliy is still under construction and not fully tested!
- 
+
 ## Classes
 You need to include the following three files into your project to use the Data-Table class.
 
 |Class|Description|
 | --- | --- |
 |cDataTable.cls|This is the main class exposing all the functionality.|
-|cIndex.cls|This class provides a database index like encapsulation of either an idex with unique keys (based on Hash Table class)|
-|cHashTable.cls|This class implements a hashtable, a structure that offers many of the features of a collection or dictionary.|
+|cIndex.cls|This class provides a database index like encapsulation of either an index with unique keys (based on Hash Table class) or an index with non-unique keys (based on cAdaptiveRadixTree). Some performance considerations on indexing. Non-unique indices are **very** expensive to create (on approx. 6m records it takes several minutes). Only use them on really large data sets (several million records) where you need to do a lot of reads (a full table scan of 6m records takes ~1.3 seconds versus an indexed search taking ~0.15 seconds [on an AMD Ryzen 5 7600 6-Core Processor with 3.80 GHz and 32 GB RAM]). So the theoretical performance improvement is approx. 10x but compared to the cost of creating the index it is tiny.|
+|cHashTable.cls|This class implements a Hash table, a structure that offers many of the features of a collection or dictionary.|
 
 ## Methods and Attributes
 The Data-Table class exposes the following Attributes and Methods.
