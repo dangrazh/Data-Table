@@ -45,9 +45,9 @@ Option Explicit
 '#======================================================================================================================
 '# Dependencies to other classes
 '#======================================================================================================================
-' cDataTable    :: is a single Index of a data column
-' cHashTable    :: is used as underlying data structure to unique indices
-' cBPlusTree    :: is used as underlying data structure to non-unique indices
+' cDataTable            :: is a single Index of a data column
+' cHashTable            :: is used as underlying data structure to unique indices
+' cAdaptiveRadixTree    :: is used as underlying data structure to non-unique indices
 
 
 '#======================================================================================================================
@@ -79,11 +79,10 @@ End Enum
 '#======================================================================================================================
 '# Private Variables
 '#======================================================================================================================
-Private m_IndexUnique As cHashTable             'The actual index itself - if it's a unique index
-'Private m_IndexNonUniuqe As cBPlusTree          'The actual index itself - if it's a non unique index
-'Private m_Index As Object                       'The generic representation of the index itself
-Private m_IndexType As IndexType                'The type of the index
-Private m_Name As String
+Private m_IndexUnique    As cHashTable            'The actual index itself - if it's a unique index
+Private m_IndexNonUnique As cAdaptiveRadixTree   'The actual index itself - if it's a non-unique index
+Private m_IndexType      As IndexType            'The type of the index
+Private m_Name           As String
 
 
 
@@ -110,9 +109,8 @@ Private Sub Class_Terminate()
 ' ************************************************
 
     'Debug.Print "|> Terminating:= " & Me.Name
-    Set m_IndexUnique = Nothing
-    'Set m_IndexNonUniuqe = Nothing
-    'Set m_Index = Nothing
+    Set m_IndexUnique    = Nothing
+    Set m_IndexNonUnique = Nothing
     
 
 End Sub
@@ -124,7 +122,8 @@ Public Property Get Version() As String
 ' Contains a list of (historical) changes to the class within the comments of the procedure.
 ' ************************************************
    'Version = "Version 1.0 (03/2017)"
-   Version = "Version 1.1 (10/2021)"    'Added method to update the position of an item, to enable garbage collection
+   'Version = "Version 1.1 (10/2021)"   'Added method to update the position of an item, to enable garbage collection
+   Version = "Version 1.2 (03/2026)"    'Implemented NonUniqueIndex using Adaptive Radix Tree (cAdaptiveRadixTree)
 
 End Property
 
@@ -206,7 +205,13 @@ Public Sub Create(ByRef DataTable As cDataTable, Column As String)
              DataTable.RsMoveNext
             Loop
          ElseIf m_IndexType = NonUniqueIndex Then
-            '§§§ to be implemented §§§
+            Set m_IndexNonUnique = New cAdaptiveRadixTree
+            DataTable.RsMoveFirst
+            Do While Not DataTable.RsEOF
+                stValue = DataTable.Item(Column)
+                m_IndexNonUnique.Add stValue, DataTable.RsBookmark
+                DataTable.RsMoveNext
+            Loop
          Else
             Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
         End If
@@ -225,12 +230,10 @@ Public Sub ItemAdd(Value As String, Position As Long)
             m_IndexUnique.Add Value, Position
         End If
      ElseIf m_IndexType = NonUniqueIndex Then
-        '§§§ to be implemented §§§
+        m_IndexNonUnique.Add Value, Position
      Else
         Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
     End If
-
-
 
 End Sub
 
@@ -246,12 +249,10 @@ Public Sub ItemRemove(Value As String, Position As Long)
             Err.Raise vbObjectError + 514, Me.name, "Value '" & Value & "' not found in index! Failed to delete from index."
         End If
      ElseIf m_IndexType = NonUniqueIndex Then
-        '§§§ to be implemented §§§
+        m_IndexNonUnique.Remove Value, Position
      Else
         Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
     End If
-
-
 
 End Sub
 
@@ -268,11 +269,10 @@ Public Sub ItemUpdateValue(ValueOld As String, ValueNew As String, Position As L
             m_IndexUnique.Add ValueNew, Position
         End If
      ElseIf m_IndexType = NonUniqueIndex Then
-        '§§§ to be implemented §§§
+        m_IndexNonUnique.UpdateKey ValueOld, ValueNew, Position
      Else
         Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
     End If
-
 
 End Sub
 
@@ -284,11 +284,10 @@ Public Sub ItemUpdatePosition(Value As String, PositionOld As Long, PositionNew 
     If m_IndexType = UniqueIndex Then
         m_IndexUnique.Item(Value) = PositionNew
      ElseIf m_IndexType = NonUniqueIndex Then
-        '§§§ to be implemented §§§
+        m_IndexNonUnique.UpdatePosition Value, PositionOld, PositionNew
      Else
         Err.Raise vbObjectError + 513, Me.name, "Can not create index without a defined index type!"
     End If
-
 
 End Sub
 
@@ -308,8 +307,12 @@ Public Function GetNextItem(SearchFor As Variant, match As Long, Optional Start 
             GetNextItem = 0
         End If
      ElseIf m_IndexType = NonUniqueIndex Then
-        '§§§ to be implemented §§§
+        ' ART supports Equals efficiently; other match types fall back to linear search in cDataTable
+        If match = Equals Then
+            GetNextItem = m_IndexNonUnique.GetFirstPosition(stSearchFor, Start)
+        Else
+            GetNextItem = 0
+        End If
     End If
-
 
 End Function
