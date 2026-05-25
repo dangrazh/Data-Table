@@ -53,7 +53,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |CreateEmptyCopy       | --| Creates an empty copy of the data table including structure but without any data or indices being copied|
 |ColumnsAdd        | ParamArray NewColumns() As Variant | Add 1..n new columns to an existing Data-Table|
 |AnalyzeDataTypes  | --|§§§ Not yet implemented §§§|
-|Execute|SQLStatement As String|Run a SQL statement on the given DataTable. Returns either a new DataTable object for SELEC statements or an integer indicating the number of rows updated/inserted/deleted.|
+|Execute|SQLStatement As String|Run a SQL statement on the given DataTable. Returns either a new DataTable object for SELECT statements or an integer indicating the number of rows updated/inserted/deleted.|
 |IndexAdd          | ColumnName As String, idxType As IndexType|Add an index to the specified column|
 |IndexRemove       | ColumnName As String|Add the index from the specified column|
 |IndicesRefresh    | --|§§§ Not yet implemented §§§|
