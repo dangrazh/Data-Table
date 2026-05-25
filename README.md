@@ -1,5 +1,5 @@
 # Data-Table
-A VB class providing advanced array based data handling. Built with several features optimized for MS Excel but working as well with VB6 or any other application supporting VBA.
+A VB class providing advanced array based data handling and a Recordset like interface as well as a SQL interface to query and manipulate data. Built with several features optimized for MS Excel but working as well with VB6 or any other application supporting VBA.
 
 ATTENTION: While the basic functionality is fully tested and should work without issues, some of the functionaliy is still under construction and not fully tested!
  
@@ -9,8 +9,13 @@ You need to include the following three files into your project to use the Data-
 |Class|Description|
 | --- | --- |
 |cDataTable.cls|This is the main class exposing all the functionality.|
-|cIndex.cls|This class provides a database index like encapsulation of either an idex with unique keys (based on Hash Table class)|
+|cIndex.cls|This class provides a database index like encapsulation of either an inndex with unique keys (based on Hash Table class) or non-unique keys (AdaptiveRadixTree class)|
+|cAdaptiveRadixTree.cls|This class implements an AdaptiveRadixTree, which is used as non-unique index data structure.|
+|cARTNode.cls|This class implements an a single node in the AdaptiveRadixTree.|
 |cHashTable.cls|This class implements a hashtable, a structure that offers many of the features of a collection or dictionary.|
+|cSQLParser.cls|A parser for ANSI 92 compliant SQL.|
+|cSQLExprNode.cls|A single SQL expression.|
+|cSQLExecutor.cls|An execution engine turning SQL statements into executable DataTable operations.|
 
 ## Methods and Attributes
 The Data-Table class exposes the following Attributes and Methods.
@@ -48,6 +53,7 @@ The Data-Table class exposes the following Attributes and Methods.
 |CreateEmptyCopy       | --| Creates an empty copy of the data table including structure but without any data or indices being copied|
 |ColumnsAdd        | ParamArray NewColumns() As Variant | Add 1..n new columns to an existing Data-Table|
 |AnalyzeDataTypes  | --|§§§ Not yet implemented §§§|
+|Execute|SQLStatement As String|Run a SQL statement on the given DataTable. Returns either a new DataTable object for SELEC statements or an integer indicating the number of rows updated/inserted/deleted.|
 |IndexAdd          | ColumnName As String, idxType As IndexType|Add an index to the specified column|
 |IndexRemove       | ColumnName As String|Add the index from the specified column|
 |IndicesRefresh    | --|§§§ Not yet implemented §§§|
